@@ -1,3 +1,0 @@
-
-.DS_Store
-timestep_data_task4.csv

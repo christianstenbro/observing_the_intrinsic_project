@@ -17,6 +17,12 @@ data <- read_csv("../data/timestep_data_task4.csv")
 ```
 
 ```{r}
-
+#downsample data set
+head(data)
 ```
+```{r}
+downsampled_data <- filter(data, 
+                           (run == 0 | run == 7) &  (agent == 0 | agent == 7) & (trial == 0 | trial == 7))
 
+write_csv(downsampled_data, "../data/downsampled_data.csv")
+```
