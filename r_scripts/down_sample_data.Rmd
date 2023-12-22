@@ -1,0 +1,28 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-12-07"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#load packages - Install Pacman if not installed
+pacman::p_load(tidyverse)
+```
+
+```{r}
+#load in .csv
+data <- read_csv("../data/timestep_data_task4.csv")
+```
+
+```{r}
+#downsample data set
+head(data)
+```
+```{r}
+downsampled_data <- filter(data, 
+                           (run == 0 | run == 7) &  (agent == 0 | agent == 7) & (trial == 0 | trial == 7))
+
+write_csv(downsampled_data, "../data/downsampled_data.csv")
+```
