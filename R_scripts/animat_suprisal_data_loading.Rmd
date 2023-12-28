@@ -17,8 +17,9 @@ pacman::p_load(ggplot2,
                tidyverse,
                arrow,
                animation,
-               magick
+               magick,
                )
+
 ```
 
 
@@ -28,14 +29,16 @@ pacman::p_load(ggplot2,
 ts_data <- read_csv("/Users/christianstenbro/AU/3_sem/Perception_and_Action/Integrated Information Theory/phi-surprisal/processed_data/timestep_data_task4.csv")
 
 # Attempting to convert to a different format:
-write_feather(ts_data, "/Users/christianstenbro/Programming/perception_action_exam/data/ts_data_feather")
+#write_feather(ts_data, "/Users/christianstenbro/Programming/perception_action_exam/data/ts_data_feather")
 
 # Reading from the feather file:
-ts_data_feather <- read_feather("/Users/christianstenbro/Programming/perception_action_exam/data/ts_data_feather")
+#ts_data_feather <- read_feather("/Users/christianstenbro/Programming/perception_action_exam/data/ts_data_feather")
 
 # Comparing dimensions:
 dim(ts_data_feather)
 dim(ts_data)
+
+ts_data <- data.table(ts_data)
 
 identical(ts_data_feather, ts_data) # Yet they are not identical . . .
 
@@ -400,6 +403,50 @@ block_size(data_input = ts_data,
 # Note that the block_size is independent by the run - it is purely determined by the type of trial.
 ```
 
+### 3.4 Making more economic functions
+
+```{r}
+# Block size:
+block_size_2 <- function(data_subset_input) {
+  return(unique(data_subset_input$block_size))
+}
+
+# Animat movement matrix:
+animat_movement_matrix_2 <- function(data_subset_input) {
+  unique_runs <- unique(data_subset_input$run)
+  movement_coordinates_dataframe <- data.frame(
+    timestep = unique(data_subset_input$timestep))
+
+  for (run_id in unique_runs) {
+    run_data <- subset(data_subset_input, run == run_id)
+    movement_coordinates <- cumsum(run_data$M2 - run_data$M1)
+    movement_coordinates_dataframe[[as.character(run_id)]] <- movement_coordinates
+  }
+return(movement_coordinates_dataframe)
+}
+
+# Block movement matrix:
+block_movement_matrix_2 <- function(data_subset_input) {
+  unique_runs <- unique(data_subset_input$run)
+  movement_coordinates_dataframe <- data.frame(
+    timestep = unique(data_subset_input$timestep))
+
+  for (run_id in unique_runs) {
+    run_data <- subset(data_subset_input, run == run_id)
+    block_movement_coordinates <- cumsum(run_data$block_movement)
+    movement_coordinates_dataframe[[as.character(run_id)]] <- block_movement_coordinates
+  }
+return(movement_coordinates_dataframe)
+}
+
+# Starting position
+starting_position <- function(input_trial) {
+  cycle_length <- 16
+  return((input_trial %% cycle_length))
+}
+```
+
+
 Now, we can combine the two functions (here they are still separated but they could easily be put together):
 
 ## 4. Combining the functions for block and animat movement
@@ -420,90 +467,109 @@ Let us also write a small starting position function. We assume that starting po
 96:111
 112:127
 
-```{r Starting position function}
-starting_position <- function(input_trial) {
-  cycle_length <- 16
-  return((input_trial %% cycle_length) + 1)
-}
-```
-
 
 ### 4.2 Working animation!!!
 
-```{r}
-# Set parameters:
-t = 3
-a = 3
-r = 34
+```{r Filtering the data looking for interesting runs}
+filter(ts_data, trial == 22 & Phi > 0) %>% filter(run == 49, agent == 52)
 ```
 
-This can be used to manage expectations:
-```{r}
-subset <- filter(ts_data, trial == t & agent == a)
-subset %>% filter(run == r)
+```{r Setting parameters}
+t = 24
+a = 80
+r = 80
 ```
 
-This is for constructing the plot:
-```{r}
-bmm <- block_movement_matrix(data_input = ts_data, 
-                trial_input = t, 
-                agent_input = a)
+```{r Sub-setting data and defining temporary objects}
+# Allocating more memory:
+memory.limit(size = 12000)
 
-amm <- movement_matrix(data_input = ts_data, 
-                trial_input = t, 
-                agent_input = a)
+# Sub-setting the data according to the selected parameters:
+subset_all_runs <- filter(ts_data, trial == t & agent == a)
+subset_specific_run <- subset_all_runs %>% filter(run == r)
+```
 
+```{r Extracting first-sight event}
+first_sight <- subset_specific_run %>% select(first_sight)
+
+for (i in 1:nrow(first_sight)) {
+  if (first_sight[[i,1]] == 1) {
+    first_sight_event <- i
+  }
+}
+```
+
+```{r Defining/printing identifiers and variables:}
+task_type <- subset_all_runs$task_type[1]
 set_starting_position <- starting_position(input_trial = t)
-
-num_dimensions <- block_size(data_input = ts_data, 
-            trial_input = t, 
-            agent_input = a)
-
 run <- (r)+2
+num_dimensions <- block_size_2(data_subset_input = subset_all_runs)
+avg_phi <- mean(subset_specific_run$Phi)
+avg_surprisal <- mean(subset_specific_run$surprisal)
+
+# Printing selected information:
+cat("Starting position =", set_starting_position, 
+    "\nBlock size =", num_dimensions,
+    "\nTask type", paste0("'",task_type, "'"),
+    "\nFirst sight event at timestep", first_sight_event,
+    "\nAvg. phi (3 digits) =", round(avg_phi, 3),
+    "\nAvg. surprisal (3 digits) =", round(avg_surprisal, 3)
+    )
 ```
 
-```{r}
+```{r Extracting the animat and block movement matrices using previously defined functions}
+# Extracting movement matrices
+bmm <- block_movement_matrix_2(data_subset_input = subset_all_runs)
+amm <- animat_movement_matrix_2(data_subset_input = subset_all_runs)
+```
+
+```{r Computing visualization data frame for the animat movement}
 # First, extract movement from a specific run:
 movement_run_0 <- amm[run]
+
+# Adding a 0th step and end-state step:
+starting_state <- 0
+end_state <- movement_run_0[nrow(movement_run_0), 1]
+movement_run_0 <- rbind(starting_state, movement_run_0, end_state)
 
 # Manually defining the coordinates for all animat body parts:
 x_1 <- movement_run_0
 x_2 <- movement_run_0 + 1
 x_3 <- movement_run_0 + 2
-y <- as.vector(rep(1, 33))
-
+y <- as.vector(rep(1, nrow(movement_run_0)))
 animat_0_movement <- data.frame(c(x_1, x_2, x_3), y, y, y)
-
-animat_0_movement
 
 # Converting the data frame with animat movement into a list of simple x y coordinate system for each time step:
 
 time_step_list <- list()
 
 for (ts in 1:nrow(animat_0_movement)) {
-  x <- gather(animat_0_movement[ts, 1:3])[,2]
+  x <- gather(animat_0_movement[ts, 1:3])[,2] + set_starting_position
   y <- gather(animat_0_movement[ts, 4:6])[,2]
-  
   x <- ((x + 16) %% 16 + 1)
-  
-  print(x)
-  
+  #print(x)
   x_y_coordinates <- tibble(x, y)
-  
   time_step_list[[ts]] <- x_y_coordinates
 }
 
 # This is perfect: Now, we can access the coordinates from the animat_movement object in a neat (plottable) way as a function of the time-step. 
-
-time_step_list[[2]]
+#time_step_list[[2]]
 ```
 
-```{r}
-### Here, we will attempt to do the same with the falling blocks:
+```{r Computing visualization data frame for the block movement}
 block_movement_run_0 <- bmm[run]
 
-block_movement_run_0 # This already corresponds to the x-axis movement. Now we need to extend the block according to its block_size:
+# Extracting end-state information
+if (block_movement_run_0[nrow(block_movement_run_0), 1] > 0) {
+  end_state_block <- block_movement_run_0[nrow(block_movement_run_0), 1]+1
+} else {
+  end_state_block <- block_movement_run_0[nrow(block_movement_run_0), 1]-1
+}
 
+# Adding a 0th step and end-state step:
+block_movement_run_0 <- rbind(0, block_movement_run_0, end_state_block)
+
+# This already corresponds to the x-axis movement. Now we need to extend the block according to its block_size:
 block_x_movement <- as.data.frame(
   sapply(1:num_dimensions, function(dim) block_movement_run_0 + (dim - 1)))
 
@@ -514,58 +580,47 @@ empty_data_frame <- data.frame(matrix(nrow=0, ncol = num_dimensions))
 
 #empty_data_frame <- rbind(c(rep(34, num_dimensions)), empty_data_frame) # This will be the 0th step - before we have timestep data . . .
 
-for (i in 1:33) {
-  empty_data_frame[i,] <- c(rep(35-i, num_dimensions)) # here, the grid height is used as the starting value
+for (i in 1:35) {
+  empty_data_frame[i,] <- c(rep(36-i, num_dimensions)) # here, the grid height is used as the starting value
 }
-
 colnames(empty_data_frame) <- paste0("y", 1:num_dimensions)
-
 block_y_movement <- empty_data_frame
+block_y_movement <- block_y_movement
 
 # Combining x and y movement
 block_movement_x_y <- data_frame(block_x_movement, block_y_movement)
-block_movement_x_y
 
-# Last step is to convert these into a list of vectors for each entry in the time step series. Luckily, we can just re-use a previous script:
-
+# Converting these into a list of vectors for each entry in the time step series:
 block_time_step_list <- list()
 
 for (ts in 1:nrow(block_movement_x_y)) {
-  x <- pivot_longer(block_movement_x_y[ts, 1:num_dimensions], cols = everything())$value + set_starting_position
+  x <- pivot_longer(block_movement_x_y[ts, 1:num_dimensions], cols = everything())$value
   y <- pivot_longer(block_movement_x_y[ts, (num_dimensions + 1):(num_dimensions * 2)], cols = everything())$value
- 
-  # Wall wrapping for x-coordinates
-  x <- ((x + 16) %% 16 + 1)
-
-  #print(x)
   
+  # Adding wall wrapping for x-coordinates
+  x <- ((x + 16) %% 16 + 1)
+  #print(x)
   block_x_y_coordinates <- tibble(x, y)
-
   block_time_step_list[[ts]] <- block_x_y_coordinates
 }
 
 ```
 
-```{r}
-
-# Combining both plots, we get:
-
-# Let's try to animate this:
-
+```{r combining animat and box movement plots}
+# Defining grid:
 grid_width <- 16
-grid_height <- 34
+grid_height <- 35
 
 # Then, we create a data frame with grid coordinates:
 grid_data <- expand.grid(x = 1:grid_width, y = 1:grid_height)
 
-# Then, we construct a for-loop to plot the animats
-
+# Then, we construct a for loop to plot the animats
 list_of_plots <- list()
 
 for (i in seq_along(block_time_step_list)) {
   
   gg <- ggplot(grid_data, aes(x, y)) +
-    geom_tile(color = "black", fill = "white") +
+    geom_tile(color = "black", fill = "beige") +
     scale_x_continuous(expand = c(0, 0), breaks = 1:grid_width) +
     scale_y_continuous(expand = c(0, 0), breaks = 1:grid_height) +
     coord_fixed(ratio = 1) +
@@ -574,66 +629,182 @@ for (i in seq_along(block_time_step_list)) {
           axis.ticks = element_blank(),
           plot.title = element_text(size = 10)) +
     geom_tile(data = block_time_step_list[[i]], 
-              aes(x, y), fill = "orange", color = "black") +
+              aes(x, y), fill = "orange", color = "black", alpha = 0.8) +
     geom_tile(data = time_step_list[[i]], 
-              aes(x, y), fill = "blue", color = "black")
-    ggtitle(paste("time_step = ", i))
+              aes(x, y), fill = "blue", color = "black", alpha = 0.8) +
+    ggtitle(paste("time_step = ", i-1))
   
   list_of_plots[[i]] <- gg
 }
 
-list_of_plots
-
+#list_of_plots
 ```
 
-## 5. Speculating about connections between behaviour and Phi
-
-At the very least, Phi seems to be 0 when movement is 0 . . . (see the plot for:
-
-    t = 3 
-    a = 3 
-    r = 34
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-### Thrown out sections
-
 ```{r}
+### Saving plots in a gif_file:
+generate_gif_filename <- function(prefix = "animation", extension = "gif") {
+  identifier <- paste0("trial", t, "_", 
+                       "agent", a, "_", 
+                       "run", r, "_", 
+                       "sight", first_sight_event, "_", 
+                       "task", task_type, "_", 
+                       "startpos", set_starting_position, "_", 
+                       "phi", avg_phi, "_", 
+                       "srpr", avg_surprisal
+                       )
+  
+  paste0(prefix, "_", identifier, ".", extension)
+}
 
-# Let's try to animate this:
+gif_file <- generate_gif_filename(prefix = "animation", extension = "gif")
 
+output_directory <- "/Users/christianstenbro/Programming/perception_action_exam/animation_folder"
+
+full_path <- file.path(output_directory, gif_file)
+
+# Saving the plots as a GIF. Note that interval sets the delay for each frame in the git. Here, it is set to 0.3 seconds.
+saveGIF({
+  for (i in seq_along(list_of_plots)) {
+    print(list_of_plots[[i]])
+  }
+}, movie.name = full_path, interval = 0.3, ani.width = 600, ani.height = 800)
+  
+```
+
+## 5. Animation function experiment
+
+```{r Defining the function}
+animating_animat <- function(t, a, r) {
+  
+subset_all_runs <- filter(ts_data, trial == t & agent == a)
+subset_specific_run <- subset_all_runs %>% filter(run == r)
+
+# Extracting first-sight event:
+first_sight <- subset_specific_run %>% select(first_sight)
+
+for (i in 1:nrow(first_sight)) {
+  if (first_sight[[i,1]] == 1) {
+    first_sight_event <- i
+  }
+}
+
+# Defining/printing identifiers and variables:}
+task_type <- subset_all_runs$task_type[1]
+set_starting_position <- starting_position(input_trial = t)
+run <- (r)+2
+num_dimensions <- block_size_2(data_subset_input = subset_all_runs)
+avg_phi <- mean(subset_specific_run$Phi)
+avg_surprisal <- mean(subset_specific_run$surprisal)
+
+# Printing selected information:
+cat("Starting position =", set_starting_position, 
+    "\nBlock size =", num_dimensions,
+    "\nTask type", paste0("'",task_type, "'"),
+    "\nFirst sight event at timestep", first_sight_event,
+    "\nAvg. phi (3 digits) =", round(avg_phi, 3),
+    "\nAvg. surprisal (3 digits) =", round(avg_surprisal, 3)
+    )
+
+# Extracting movement matrices
+bmm <- block_movement_matrix_2(data_subset_input = subset_all_runs)
+amm <- animat_movement_matrix_2(data_subset_input = subset_all_runs)
+
+### Computing visualization data frame for the animat movement}
+
+# First, extract movement from a specific run:
+movement_run_0 <- amm[run]
+
+# Adding a 0th step and end-state step:
+starting_state <- 0
+end_state <- movement_run_0[nrow(movement_run_0), 1]
+movement_run_0 <- rbind(starting_state, movement_run_0, end_state)
+
+# Manually defining the coordinates for all animat body parts:
+x_1 <- movement_run_0
+x_2 <- movement_run_0 + 1
+x_3 <- movement_run_0 + 2
+y <- as.vector(rep(1, nrow(movement_run_0)))
+animat_0_movement <- data.frame(c(x_1, x_2, x_3), y, y, y)
+
+# Converting the data frame with animat movement into a list of simple x y coordinate system for each time step:
+
+time_step_list <- list()
+
+for (ts in 1:nrow(animat_0_movement)) {
+  x <- gather(animat_0_movement[ts, 1:3])[,2] + set_starting_position
+  y <- gather(animat_0_movement[ts, 4:6])[,2]
+  x <- ((x + 16) %% 16 + 1)
+  #print(x)
+  x_y_coordinates <- tibble(x, y)
+  time_step_list[[ts]] <- x_y_coordinates
+}
+
+# This is perfect: Now, we can access the coordinates from the animat_movement object in a neat (plottable) way as a function of the time-step. 
+#time_step_list[[2]]
+
+### Computing visualization data frame for the block movement}
+block_movement_run_0 <- bmm[run]
+
+# Extracting end-state information
+if (block_movement_run_0[nrow(block_movement_run_0), 1] > 0) {
+  end_state_block <- block_movement_run_0[nrow(block_movement_run_0), 1]+1
+} else {
+  end_state_block <- block_movement_run_0[nrow(block_movement_run_0), 1]-1
+}
+
+# Adding a 0th step and end-state step:
+block_movement_run_0 <- rbind(0, block_movement_run_0, end_state_block)
+
+# This already corresponds to the x-axis movement. Now we need to extend the block according to its block_size:
+block_x_movement <- as.data.frame(
+  sapply(1:num_dimensions, function(dim) block_movement_run_0 + (dim - 1)))
+
+colnames(block_x_movement) <- paste0("x", 1:num_dimensions)
+
+# How to construct y-axis movement? This is just a vector with descending values from 35 to 1:
+empty_data_frame <- data.frame(matrix(nrow=0, ncol = num_dimensions))
+
+#empty_data_frame <- rbind(c(rep(34, num_dimensions)), empty_data_frame) # This will be the 0th step - before we have timestep data . . .
+
+for (i in 1:35) {
+  empty_data_frame[i,] <- c(rep(36-i, num_dimensions)) # here, the grid height is used as the starting value
+}
+colnames(empty_data_frame) <- paste0("y", 1:num_dimensions)
+block_y_movement <- empty_data_frame
+block_y_movement <- block_y_movement
+
+# Combining x and y movement
+block_movement_x_y <- data_frame(block_x_movement, block_y_movement)
+
+# Converting these into a list of vectors for each entry in the time step series:
+block_time_step_list <- list()
+
+for (ts in 1:nrow(block_movement_x_y)) {
+  x <- pivot_longer(block_movement_x_y[ts, 1:num_dimensions], cols = everything())$value
+  y <- pivot_longer(block_movement_x_y[ts, (num_dimensions + 1):(num_dimensions * 2)], cols = everything())$value
+  
+  # Adding wall wrapping for x-coordinates
+  x <- ((x + 16) %% 16 + 1)
+  #print(x)
+  block_x_y_coordinates <- tibble(x, y)
+  block_time_step_list[[ts]] <- block_x_y_coordinates
+}
+
+### Combining animat and box movement plots}
+# Defining grid:
 grid_width <- 16
 grid_height <- 35
 
 # Then, we create a data frame with grid coordinates:
 grid_data <- expand.grid(x = 1:grid_width, y = 1:grid_height)
 
-# Then, we construct a for-loop to plot the animats
-
+# Then, we construct a for loop to plot the animats
 list_of_plots <- list()
 
 for (i in seq_along(block_time_step_list)) {
   
   gg <- ggplot(grid_data, aes(x, y)) +
-    geom_tile(color = "black", fill = "white") +
+    geom_tile(color = "black", fill = "beige") +
     scale_x_continuous(expand = c(0, 0), breaks = 1:grid_width) +
     scale_y_continuous(expand = c(0, 0), breaks = 1:grid_height) +
     coord_fixed(ratio = 1) +
@@ -642,261 +813,79 @@ for (i in seq_along(block_time_step_list)) {
           axis.ticks = element_blank(),
           plot.title = element_text(size = 10)) +
     geom_tile(data = block_time_step_list[[i]], 
-              aes(x, y), fill = "blue", color = "black") +
-    ggtitle(paste("time_step = ", i))
+              aes(x, y), fill = "orange", color = "black", alpha = 0.8) +
+    geom_tile(data = time_step_list[[i]], 
+              aes(x, y), fill = "blue", color = "black", alpha = 0.8) +
+    ggtitle(paste("time_step = ", i-1))
   
   list_of_plots[[i]] <- gg
 }
 
-list_of_plots
-```
-
-
-```{r Converting agent data to coordinates (throw out)}
-
-# From the agent time step data, we want to extract coordinates corresponding to movements. We can assume some random starting position.
-
-# The idea is to create a new data frame. For each time-step (t_1 . . . t_33) in a run (r_0 . . . r_99), we will represent the coordinate position of the agent. Technically, we will only care about the position of the center, as the rest is given from this. 
-
-# The movement is taken from M1 and M2: If M1 = 1, subtract 1 from the coordinate. If M1 = 0, do nothing. If M2 = 1, add one to the coordinate. If M2 = 0, do nothing. 
-
-# For a good challenge, I will attempt the creation of this data frame myself, using a for loop.
-
-agent_0_ts_data_trial_127
-
-# Let's select a single run:
-
-agent_0_ts_data_run_5 <- agent_0_ts_data_trial_127 %>% 
-  filter(run == 5)
-
-# Converting M1 + M2 to integers:
-
-agent_0_ts_data_run_5 <- agent_0_ts_data_run_5 %>% 
-  mutate(M1 = as.numeric(M1), 
-         M2 = as.numeric(M2))
-
-agent_0_ts_data_run_5
-
-# Structure of a for loop:
-
-coordinates <- rep(0, nrow(agent_0_ts_data_run_5)) # Create a list to store the output of the for loop:
-
-for (i in 1:(nrow(agent_0_ts_data_run_5))) {
- 
-  if (agent_0_ts_data_run_5$M1[i] == 1) {
-    
-    coordinates[i] <- coordinates[i - 1] + agent_0_ts_data_run_5$M1[i] + 1
+### Saving plots in a gif_file:
+generate_gif_filename <- function(prefix = "animation", extension = "gif") {
+  identifier <- paste0("trial", t, "_", 
+                       "agent", a, "_", 
+                       "run", r, "_", 
+                       "sight", first_sight_event, "_", 
+                       "task", task_type, "_", 
+                       "startpos", set_starting_position, "_", 
+                       "phi", avg_phi, "_", 
+                       "srpr", avg_surprisal
+                       )
   
-    }
+  paste0(prefix, "_", identifier, ".", extension)
 }
 
-coordinates <- cumsum(-agent_0_ts_data_run_5$M1) + cumsum(agent_0_ts_data_run_5$M2)
+gif_file <- generate_gif_filename(prefix = "animation", extension = "gif")
 
-cumsum(-agent_0_ts_data_run_5$M1)
+output_directory <- "/Users/christianstenbro/Programming/perception_action_exam/animation_folder"
 
-coordinates
+full_path <- file.path(output_directory, gif_file)
 
-# Attempting a loop creating coordinates pr. trial
-
-agent_0_ts_data_trial_127
-
-movement_coordinates_list <- vector("list", length = max(agent_0_ts_data_trial_127$run))
-
-for (run_id in unique(agent_0_ts_data_trial_127$run)) {
-  run_data <- subset(agent_0_ts_data_trial_127, run == run_id)
-  
-  movement_coordinates <- cumsum(run_data$M2 - run_data$M1)
-
-  movement_coordinates_list[[as.character(run_id)]] <- movement_coordinates
-}
-
-class(movement_coordinates_list)
-
-# Alternative attempt using a data frame
-
-unique_runs <- unique(agent_0_ts_data_trial_127$run)
-
-movement_coordinates_dataframe <- data.frame(timestep = unique(agent_0_ts_data_trial_127$timestep))
-
-movement_coordinates_dataframe
-
-for (run_id in unique_runs) {
-  run_data <- subset(agent_0_ts_data_trial_127, run == run_id)
-  
-  movement_coordinates <- cumsum(run_data$M2 - run_data$M1)
-  
-  movement_coordinates_dataframe[[as.character(run_id)]] <- movement_coordinates
-}
-
-movement_coordinates_dataframe
-
-```
-
-Let's assume a pattern:
-
-Pattern guess 1:
-
-t_1
-Starting position (right corner of block): (x = 0, y = 34)
-Direction: Right to left
-Block size: 3
-
-t_2
-Starting position (right corner of block): (x = 0, y = 34)
-Direction: Left to right
-Block size: 3
-
-t_3
-Starting position (right corner of block): (x = 1, y = 34)
-Direction: Right to left
-Block size: 3
-
-t_4
-Starting position (right corner of block): (x = 1, y = 34)
-Direction: Left to right
-Block size: 3
-
-. . . And so on.
-
-In this pattern the structure is the following:
-
-- For each trial subset (determined by block size) the block starts in the first position (x = 0, y = 34).
-
-- For the first time-step (t_1), the block moves from right to left
-
-- For the second time_step (t_2), the block moves from left to right
-
-- For the next two time_steps, this pattern is repeated, but this time from the starting position (x = 1, y = 34).
-
-This is an assumed pattern. The actual pattern does not completely matter, as long as the result matches. 
-
-And alternative pattern would first shuffle through the starting positions for right-moving blocks, then shuffle through them for left-moving blocks. Potentially, we could test both of these patterns and see which ones correspond with the first-sight conditions of the animat.
-
-```{r Commented out animation stuff (could very well be relevant later)}
-# install.packages("magick")
-# library(magick)
-# 
-# # Create a magick image list
-# image_list <- image_graph(width = 500, height = 400, res = 96)
-# 
-# # Assuming agent_0_ts_data_trial_127$timestep and agent_0_ts_data_trial_127$M2 have the same length
-# for (i in 1:length(agent_0_ts_data_trial_127$timestep)) {
-#   # Create a plot for each data point
-#   plot(x = agent_0_ts_data_trial_127$timestep[1:i], 
-#        y = agent_0_ts_data_trial_127$M2[1:i], 
-#        type = "l",
-#        main = paste("Plot ", i))
-#   
-#   # Add the current plot to the image list
-#   image_list <- image_list + last_plot()
-# }
-# 
-# # Save the image list as a GIF
-# image_write(image_list, path = "animation.gif", format = "gif")
-```
-
-```{r New animation function}
-
-plot_agent_position <- function(movement_matrix_input) {
-  
-  # Extracting the number of runs:
-  num_runs <- ncol(movement_matrix_input) - 1
-  
-  # Defining the grid world:
-  grid_width <- 16
-  grid_height <- 35
-  
-  grid_data <- expand.grid(x=1:grid_width, y = 1:grid_height)
-  
-  # Initializes an empty grid:
-  gg <- ggplot(grid_data, aes(x, y)) +
-    geom_tile(color = "black", fill = "white") +
-    scale_x_continuous(expand = c(0, 0), breaks = 1:grid_width) +
-    scale_y_continuous(expand = c(0, 0), breaks = 1:grid_height) +
-    coord_fixed(ratio = 1) +
-    theme_minimal() +
-    theme(axis.text = element_blank(), axis.ticks = element_blank())
-  
-  animat_positions <- data.frame()
-  
-  # Plotting the position of the animat:
-  for (i in 2:(num_runs + 1)) {
-    run_id <- names(movement_matrix_input)[i]
-    run_coordinates <- movement_matrix_input[[run_id]]
-    
-    animat_x <- run_coordinates[length(run_coordinates)]
-    
-    animat_positions <- rbind(agent_positions, data.frame(x = animat_x, y = 1:3, run = run_id))
-    
+# Saving the plots as a GIF. Note that interval sets the delay for each frame in the git. Here, it is set to 0.3 seconds.
+saveGIF({
+  for (i in seq_along(list_of_plots)) {
+    print(list_of_plots[[i]])
   }
-
-  gg <- gg + geom_tile(data = NULL, aes(x = animat_x, y = 1:3), fill = "blue", color = "black")
+}, movie.name = full_path, interval = 0.3, ani.width = 600, ani.height = 800)
   
-  print(gg)
+
 }
+```
 
-# Testing out the function:
+```{r Testing the function}
+animating_animat(t = 90, a = 80, r = 80)
+```
+## 6. Creating stimuli battery for the experiment
 
-movement_matrix_1 <- movement_matrix(data_input = ts_data, 
-                trial_input = 127, 
-                agent_input = 5)
+The next step is to make a sampling mechanism for trial selection. The most important thing is that a wide spectrum of avg. phi values is selected. One way to ensure this is to:
 
-plot_agent_position(movement_matrix_input = movement_matrix_1)
+1) Calculate avg. phi value for all trials_agents_runs. 
+2) Randomly pick samples from this distribution with equidistant avg. phi values covering the entire range (within some acceptable range of deviation - we cannot expect to have exactly matching phi values). 
+
+Reflections regarding 2): 
+
+- It is worth considering the amount of trials for each participants. 
+- It is also worth to consider whether each participants should have the exact same stimuli (corresponding to exactly the same runs across agents and trials), or whether each participant should have their own random sample (covering a similar spectrum of avg. phi values). 
+- What is an acceptable deviation for avg. phi values? The data has to be binned, but in the most elegant version of this experiment, each trial is still selected semi-randomly . . .
+
+Further thoughts regarding experimental design: 
+
+3) The participants need to know what the task is. This can possibly be handled with some kind of splash screen between each trial. 
+
+### 6.1 Calculating avg. phi for all runs across agents and trials
+
+This should be possible via an epic for loop:
+
+```{r}
+
+
+
 
 ```
 
-```{r Working grid example}
 
-# Now, we create a loop that initializes a gg plot pr. time_step (1:33):
-  
-  
-  gg <- ggplot(grid_data, aes(x, y)) +
-  geom_tile(color = "black", fill = "white") +
-  scale_x_continuous(expand = c(0, 0), breaks = 1:grid_width) +
-  scale_y_continuous(expand = c(0, 0), breaks = 1:grid_height) +
-  coord_fixed(ratio = 1) +
-  theme_minimal() +
-  theme(axis.text = element_blank(), axis.ticks = element_blank()) +
-  geom_tile(aes(x = animat_0_movement[ts,1:3], y = animat_0_movement[ts,4:6]), fill = "blue", color = "black")
-  
-print(gg)
+### 6.2 Picking samples from the trial distribution
 
 
-
-
-
-
-
-
-### Working grid:
-
-grid_width <- 16
-grid_height <- 35
-
-# Then, we create a data frame with grid coordinates:
-grid_data <- expand.grid(x = 1:grid_width, y = 1:grid_height)
-
-grid_data
-
-# Mock agent data (for testing):
-agent_data <- data.frame(
-  x = c(7,8,9),  # x-coordinates of the squares. Notice that we are beginning at 1 here! Very R.
-  y = rep(1, 3)            # y-coordinates of the squares (in the bottom row)
-)
-
-
-# Create a ggplot with a visible grid
-ggplot(grid_data, aes(x, y)) +
-  geom_tile(color = "black", fill = "white") +
-  scale_x_continuous(expand = c(0, 0), breaks = 1:grid_width) +
-  scale_y_continuous(expand = c(0, 0), breaks = 1:grid_height) +
-  coord_fixed(ratio = 1) +
-  theme_minimal() +
-  theme(axis.text = element_blank(), axis.ticks = element_blank()) +
-  geom_tile(data = agent_data, aes(x, y), fill = "blue", color = "black")
-
-agent_data
-
-
-```
 
