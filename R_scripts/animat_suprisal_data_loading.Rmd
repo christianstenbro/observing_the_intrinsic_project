@@ -17,9 +17,7 @@ pacman::p_load(ggplot2,
                tidyverse,
                arrow,
                animation,
-               magick,
-               )
-
+               magick)
 ```
 
 
@@ -35,16 +33,16 @@ ts_data <- read_csv("/Users/christianstenbro/AU/3_sem/Perception_and_Action/Inte
 #ts_data_feather <- read_feather("/Users/christianstenbro/Programming/perception_action_exam/data/ts_data_feather")
 
 # Comparing dimensions:
-dim(ts_data_feather)
-dim(ts_data)
+#dim(ts_data_feather)
+#dim(ts_data)
 
-ts_data <- data.table(ts_data)
+#ts_data <- data.table(ts_data)
 
-identical(ts_data_feather, ts_data) # Yet they are not identical . . .
+#identical(ts_data_feather, ts_data) # Yet they are not identical . . .
 
 # For now, I will stick with the original data, but this is not a closed issue.
 
-dim(ts_data_trial_127)
+#dim(ts_data_trial_127)
 ```
 
 ```{r Sampling a portion of the data for experimentation}
@@ -490,7 +488,7 @@ subset_specific_run <- subset_all_runs %>% filter(run == r)
 ```
 
 ```{r Extracting first-sight event}
-first_sight <- subset_specific_run %>% select(first_sight)
+first_sight_vec <- subset_specific_run %>% select(subset_specific_run$first_sight)
 
 for (i in 1:nrow(first_sight)) {
   if (first_sight[[i,1]] == 1) {
@@ -673,17 +671,30 @@ saveGIF({
 
 ## 5. Animation function experiment
 
+
+```{r}
+subset_all_runs
+subset_specific_run
+subset_specific_run$first_sight
+
+1:nrow(first_sight_vec)
+
+first_sight_vec[4]
+
+1:length(first_sight_vec)
+```
+
 ```{r Defining the function}
-animating_animat <- function(t, a, r) {
+animating_animat <- function(t, a, r, batch_name) {
   
 subset_all_runs <- filter(ts_data, trial == t & agent == a)
 subset_specific_run <- subset_all_runs %>% filter(run == r)
 
 # Extracting first-sight event:
-first_sight <- subset_specific_run %>% select(first_sight)
+first_sight_vec <- subset_specific_run$first_sight
 
-for (i in 1:nrow(first_sight)) {
-  if (first_sight[[i,1]] == 1) {
+for (i in 1:length(first_sight_vec)) {
+  if (first_sight_vec[i] == 1) {
     first_sight_event <- i
   }
 }
@@ -823,7 +834,8 @@ for (i in seq_along(block_time_step_list)) {
 
 ### Saving plots in a gif_file:
 generate_gif_filename <- function(prefix = "animation", extension = "gif") {
-  identifier <- paste0("trial", t, "_", 
+  identifier <- paste0(sampled_data$stratum[s], "_",
+                       "trial", t, "_", 
                        "agent", a, "_", 
                        "run", r, "_", 
                        "sight", first_sight_event, "_", 
@@ -838,7 +850,11 @@ generate_gif_filename <- function(prefix = "animation", extension = "gif") {
 
 gif_file <- generate_gif_filename(prefix = "animation", extension = "gif")
 
-output_directory <- "/Users/christianstenbro/Programming/perception_action_exam/animation_folder"
+output_directory <- paste0("/Users/christianstenbro/Programming/perception_action_exam/animation_folder/", batch_name)
+
+if (!dir.exists(output_directory)) {
+    dir.create(output_directory)
+  }
 
 full_path <- file.path(output_directory, gif_file)
 
@@ -854,8 +870,9 @@ saveGIF({
 ```
 
 ```{r Testing the function}
-animating_animat(t = 90, a = 80, r = 80)
+animating_animat(t = 90, a = 80, r = 80, batch_name = "batch_1")
 ```
+
 ## 6. Creating stimuli battery for the experiment
 
 The next step is to make a sampling mechanism for trial selection. The most important thing is that a wide spectrum of avg. phi values is selected. One way to ensure this is to:
@@ -875,17 +892,99 @@ Further thoughts regarding experimental design:
 
 ### 6.1 Calculating avg. phi for all runs across agents and trials
 
-This should be possible via an epic for loop:
+This should be possible via tidyverse pipeline operations:
 
-```{r}
+```{r Calculating avg. phi}
+# Grouping the data by run, agent, trial and calculating the average Phi:
+ts_tibble <- tibble(ts_data)
+ts_tibble <- ts_tibble %>% group_by(run, agent, trial)
+avg_phi_data <- ts_tibble %>% summarise(mean(Phi))
+avg_phi_data <- avg_phi_data %>% rename(avg_phi = `mean(Phi)`)
 
-
-
-
+# Visualizing the distribution of avg. Phi scores:
+ggplot(avg_phi_data, aes(x = avg_phi, fill = "red")) +
+  geom_density() +
+  theme_minimal() +
+  ggtitle("Fig. 1: Mean Phi distribution across all runs")
 ```
+Commenting on the distribution: 
 
+While we clearly don't have a bell curve, it is still instructive for the experiment to test a wide range of phi values. This does mean that higher phi values will be heavily over-represented in the stimuli battery compared to the actual distribution. 
+
+```{r Calculating some stats on the distribution of phi values}
+# Making a boxplot:
+boxplot(avg_phi_data$avg_phi, horizontal=TRUE, main = "Fig. 2: Mean Phi Scores Boxplot", xlab = "Phi")
+
+# And descriptive statistics + range of the phi values:
+cat("Range: From", range(avg_phi_data$avg_phi)[1], "to", range(avg_phi_data$avg_phi)[2], "\n\n", "Descriptive statistics:\n")
+summary(avg_phi_data$avg_phi)
+```
+Output pasted:
+
+Range: From 0 to 2.518749 
+
+Descriptive statistics:
+
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+0.00000 0.03304 0.18750 0.31162 0.47939 2.51875 
 
 ### 6.2 Picking samples from the trial distribution
 
+We can now use stratified sampling:
+
+```{r Stratified sampling according to the binned avg. phi distrubition}
+# Setting seed:
+set.seed(seed = 100)
+
+# Defining the bins from the phi value range:
+num_bins <- 10
+phi_seq <- seq(min(avg_phi_data$avg_phi), max(avg_phi_data$avg_phi), length.out = num_bins + 1)
+
+# Removing previous grouping: 
+avg_phi_data <- tibble(avg_phi_data)
+
+# Assigning unique Stratum_ID dependent on the value of phi:
+avg_phi_data <- mutate(avg_phi_data, stratum = case_when(
+  between(avg_phi_data$avg_phi, phi_seq[1], phi_seq[2]) ~ "Stratum_1",
+  between(avg_phi_data$avg_phi, phi_seq[2], phi_seq[3]) ~ "Stratum_2",
+  between(avg_phi_data$avg_phi, phi_seq[3], phi_seq[4]) ~ "Stratum_3",
+  between(avg_phi_data$avg_phi, phi_seq[4], phi_seq[5]) ~ "Stratum_4",
+  between(avg_phi_data$avg_phi, phi_seq[5], phi_seq[6]) ~ "Stratum_5",
+  between(avg_phi_data$avg_phi, phi_seq[6], phi_seq[7]) ~ "Stratum_6",
+  between(avg_phi_data$avg_phi, phi_seq[7], phi_seq[8]) ~ "Stratum_7",
+  between(avg_phi_data$avg_phi, phi_seq[8], phi_seq[9]) ~ "Stratum_8",
+  between(avg_phi_data$avg_phi, phi_seq[9], phi_seq[10]) ~ "Stratum_9",
+  between(avg_phi_data$avg_phi, phi_seq[10], phi_seq[11]) ~ "Stratum_10"
+  )
+  )
+
+# avg_phi_data %>% filter(avg_phi > phi_seq[10])
+# We can notice that the very high value of phi only occurs for very specific runs (weirdly).
+      
+# Random sampling of runs based on the phi strata:
+n_per_stratum <- 2
+
+# Perform stratified sampling
+sampled_data <- avg_phi_data %>%
+  group_by(stratum) %>%
+  slice_sample(n = n_per_stratum, replace = FALSE)
+```
+
+## 7. Visualizing stimuli battery
+
+```{r Using looping for the visualization}
+# Removing grouping:
+sampled_data <- data_frame(sampled_data)
+
+# Setting batch name (creates a folder of the same name in the animation output folder):
+batch <- "batch_3"
+batch_name <- paste0(batch, "_s", n_per_stratum)
+
+# Making a for loop for visualization:
+for (s in 1:nrow(sampled_data)) {
+  animating_animat(t = sampled_data$trial[s], a = sampled_data$agent[s], r = sampled_data$run[s], batch_name = batch_name)
+}
+
+```
 
 
