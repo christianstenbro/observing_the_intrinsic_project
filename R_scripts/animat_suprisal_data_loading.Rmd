@@ -685,7 +685,7 @@ first_sight_vec[4]
 ```
 
 ```{r Defining the function}
-animating_animat <- function(t, a, r, batch_name) {
+animating_animat <- function(input_data, t, a, r, batch_name) {
   
 subset_all_runs <- filter(ts_data, trial == t & agent == a)
 subset_specific_run <- subset_all_runs %>% filter(run == r)
@@ -834,7 +834,7 @@ for (i in seq_along(block_time_step_list)) {
 
 ### Saving plots in a gif_file:
 generate_gif_filename <- function(prefix = "animation", extension = "gif") {
-  identifier <- paste0(sampled_data$stratum[s], "_",
+  identifier <- paste0(input_data$stratum[s], "_",
                        "trial", t, "_", 
                        "agent", a, "_", 
                        "run", r, "_", 
@@ -934,7 +934,9 @@ We can now use stratified sampling:
 
 ```{r Stratified sampling according to the binned avg. phi distrubition}
 # Setting seed:
-set.seed(seed = 100)
+#set.seed(seed = 100) # Used for generating test batches
+set.seed(seed = 200) # Used for generating the experimental stimuli batch
+
 
 # Defining the bins from the phi value range:
 num_bins <- 10
@@ -962,7 +964,7 @@ avg_phi_data <- mutate(avg_phi_data, stratum = case_when(
 # We can notice that the very high value of phi only occurs for very specific runs (weirdly).
       
 # Random sampling of runs based on the phi strata:
-n_per_stratum <- 2
+n_per_stratum <- 5
 
 # Perform stratified sampling
 sampled_data <- avg_phi_data %>%
@@ -977,7 +979,131 @@ sampled_data <- avg_phi_data %>%
 sampled_data <- data_frame(sampled_data)
 
 # Setting batch name (creates a folder of the same name in the animation output folder):
-batch <- "batch_3"
+batch <- "batch_7"
+batch_name <- paste0(batch, "_s", n_per_stratum)
+
+# Making a for loop for visualization:
+for (s in 1:nrow(sampled_data)) {
+  animating_animat(input_data = sampled_data, t = sampled_data$trial[s], a = sampled_data$agent[s], r = sampled_data$run[s], batch_name = batch_name)
+}
+
+```
+
+Block size 3, trial range:  0-31 
+Block size 4, trial range:  32-63 
+Block size 5, trial range:  96-127 
+Block size 6, trial range:  64-95
+
+Catch = block size 3 + 6
+Avoid = block size 4 + 5
+
+
+```{r Sampling from the batch ensuring balanced task type}
+set.seed(seed = 200)
+
+# Coding the task_type based on trial:
+sampled_data_batch_7 <- sampled_data
+
+sampled_data_batch_7 <- sampled_data_batch_7 %>% mutate(task_type = case_when(
+    trial <= 31 ~ "Catch",
+    trial > 31 & trial <= 63 ~ "Avoid",
+    trial > 63 & trial <= 95 ~ "Catch",
+    trial > 95 & trial <= 127 ~ "Avoid",
+))
+
+# Sampling from the batch while balancing the task_type:
+final_battery <- sampled_data_batch_7 %>% group_by(stratum, task_type) %>% slice_sample(n = 1)
+
+final_battery # Unfortunately, these are right now filtered manually from the batch
+
+final_battery
+
+final_battery$stratum <- factor(final_battery$stratum, levels = c("Stratum_1", "Stratum_2", "Stratum_3", "Stratum_4", "Stratum_5", "Stratum_6", "Stratum_7", "Stratum_8", "Stratum_9", "Stratum_10"))
+
+# Plotting avg. phi structure of the final test battery:
+
+ggplot(final_battery, aes(x = avg_phi, color = task_type)) +
+  geom_density() # Note that this might not be the perfect visualization as it aggregates the already aggregated phi values.
+
+tick_lab <- seq(1:10)
+
+ggplot(final_battery, aes(x = final_battery$stratum, y = final_battery$avg_phi, color = final_battery$task_type)) + 
+  geom_point(alpha = 0.7, size = 2) + 
+  ggtitle("Fig. 3: Avg. Phi for each strata in the stimuli battery") +
+  labs(color = "Task type") +
+  xlab("Stratum") + 
+  ylab("Avg. Phi") +
+  scale_x_discrete(labels = tick_lab) +
+  theme_minimal()
+
+```
+
+```{r Using looping for the visualization}
+# Removing grouping:
+final_battery <- data_frame(final_battery)
+
+final_battery
+
+# Setting batch name (creates a folder of the same name in the animation output folder):
+batch <- "batch_9"
+batch_name <- paste0(batch, "balanced")
+
+# Making a for loop for visualization:
+for (s in 1:nrow(final_battery)) {
+  animating_animat(input_data = final_battery, t = final_battery$trial[s], a = final_battery$agent[s], r = final_battery$run[s], batch_name = batch_name)
+}
+
+```
+
+
+Notes on batch generation: 
+
+Batch 1-3 (test batches) generated with random seed 100
+Batch 5-8 (experimental stimuli) generated with random seed 200
+
+## 8. New approach with only 5 strata but balanced sample:
+
+```{r Stratified sampling according to the binned avg. phi distrubition}
+# Setting seed:
+#set.seed(seed = 100) # Used for generating test batches
+set.seed(seed = 200) # Used for generating the experimental stimuli batch
+
+# Defining the bins from the phi value range:
+num_bins <- 5
+phi_seq <- seq(min(avg_phi_data$avg_phi), max(avg_phi_data$avg_phi), length.out = num_bins + 1)
+
+# Removing previous grouping: 
+avg_phi_data <- tibble(avg_phi_data)
+
+# Assigning unique Stratum_ID dependent on the value of phi:
+avg_phi_data <- mutate(avg_phi_data, stratum = case_when(
+  between(avg_phi_data$avg_phi, phi_seq[1], phi_seq[2]) ~ "Stratum_1",
+  between(avg_phi_data$avg_phi, phi_seq[2], phi_seq[3]) ~ "Stratum_2",
+  between(avg_phi_data$avg_phi, phi_seq[3], phi_seq[4]) ~ "Stratum_3",
+  between(avg_phi_data$avg_phi, phi_seq[4], phi_seq[5]) ~ "Stratum_4",
+  between(avg_phi_data$avg_phi, phi_seq[5], phi_seq[6]) ~ "Stratum_5"
+  )
+  )
+
+# avg_phi_data %>% filter(avg_phi > phi_seq[10])
+# We can notice that the very high value of phi only occurs for very specific runs (weirdly).
+      
+# Random sampling of runs based on the phi strata:
+n_per_stratum <- 5
+
+# Perform stratified sampling
+sampled_data <- avg_phi_data %>%
+  group_by(stratum) %>%
+  slice_sample(n = n_per_stratum, replace = FALSE)
+```
+
+
+```{r Using looping for the visualization}
+# Removing grouping:
+sampled_data <- data_frame(sampled_data)
+
+# Setting batch name (creates a folder of the same name in the animation output folder):
+batch <- "batch_8"
 batch_name <- paste0(batch, "_s", n_per_stratum)
 
 # Making a for loop for visualization:
@@ -987,4 +1113,35 @@ for (s in 1:nrow(sampled_data)) {
 
 ```
 
+Catch = block size 3 + 6
+
+      Block size 3, trial range:  0-31 
+      Block size 6, trial range:  64-95
+      
+Avoid = block size 4 + 5
+
+    Block size 4, trial range:  32-63 
+    Block size 5, trial range:  96-127 
+
+```{r Sampling from the batch ensuring balanced task type}
+# Coding the task_type based on trial:
+sampled_data_batch_8 <- sampled_data
+
+sampled_data_batch_8 <- sampled_data_batch_8 %>% mutate(task_type = case_when(
+    trial <= 31 ~ "Catch",
+    trial > 31 & trial <= 63 ~ "Avoid",
+    trial > 63 & trial <= 95 ~ "Catch",
+    trial > 95 & trial <= 127 ~ "Avoid",
+))
+
+sampled_data_batch_8
+
+# Sampling (n = 10) from the batch while balancing the task_type:
+n = 10
+
+sampled_data_batch_8 %>% group_by(stratum, task_type) %>% slice_sample(n = 1)
+
+ts_data %>% filter(run == 36, agent == 62, trial == 102)
+
+```
 
