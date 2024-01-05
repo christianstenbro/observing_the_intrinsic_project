@@ -1,0 +1,94 @@
+---
+title: "animat_experiment_analysis"
+author: "Christian Stenbro"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+pacman::p_load(tidyverse, 
+               janitor)
+```
+
+
+```{r}
+data <- read_csv("/Users/christianstenbro/AU/3_sem/Perception_and_Action/Eksamen/Data/betwixt_report_analysis__6599892855253518349_cleaned.csv")
+
+# Removing the empty rows and irrelevant columns:
+data <- data %>% filter(s1_catch != "NA") %>% select(-`Overall Status`, -...23)
+
+# Cleaning names:
+data <- clean_names(data)
+data <- data %>% rename(qualitative = how_did_you_make_your_rating_you_do_not_have_to_respond)
+```
+
+```{r}
+# Adding an ID column: 
+subj_id <- factor(seq(1:nrow(data)))
+data <- cbind(subj_id, data)
+
+# Transforming data frame from wide to long format:
+data_long <- pivot_longer(data, names_to = "variable", cols = s1_catch:s10_avoid)
+data_long <- tibble(data_long)
+head(data_long)
+
+# Adding coding for variable type:
+code <- c("catch", "avoid")
+task_type <- rep(code, nrow(data_long)/2)
+identical(nrow(data_long), length(task_type))
+data_long <- cbind(data_long, task_type)
+data_long <- tibble(data_long)
+head(data_long)
+```
+```{r}
+# Initial visualization
+tick_lab <- seq(1:length(unique(data_long$variable)))
+
+# data_long %>% ggplot(aes(x = variable, y = value, color = subj_id)) +
+#   geom_point() + 
+#   facet_wrap(~task_type) +
+#   scale_x_discrete(labels = tick_lab)
+
+data_long %>% filter(task_type == "catch") %>% 
+  ggplot(aes(x = variable, y = value, color = subj_id)) +
+  geom_point() + 
+  facet_wrap(~subj_id) +
+  scale_x_discrete(labels = NULL) +
+  ggtitle("Task type: catch")
+
+data_long %>% filter(task_type == "avoid") %>% 
+  ggplot(aes(x = variable, y = value, color = subj_id)) +
+  geom_point() + 
+  facet_wrap(~subj_id) +
+  scale_x_discrete(labels = NULL) +
+  ggtitle("Task type: avoid")
+
+# data_long %>% ggplot(aes(x = variable, y = value)) +
+#   geom_boxplot() +
+#   scale_x_discrete(labels = tick_lab)
+```
+There is definitely something systematic going on, but I don't think it relates to Phi at all (since Phi is the organizing principle on the x-axis). 
+
+```{r}
+
+# Loading the final battery data frame:
+battery_data <- read_csv("/Users/christianstenbro/Programming/perception_action_exam/data/final_battery.csv")
+
+# Merging with experimental data:
+
+## Extracting variable names:
+variable_names <- unique(data_long$variable)
+
+## Reordering battery data frame and appending variable_names:
+battery_data$stratum <- factor(battery_data$stratum, levels = c("Stratum_1", "Stratum_2", "Stratum_3", "Stratum_4", "Stratum_5", "Stratum_6", "Stratum_7", "Stratum_8", "Stratum_9", "Stratum_10"))
+battery_data <- arrange(battery_data, by = stratum)
+
+
+cbind(battery_data, variable_names)
+```
+
+

@@ -898,14 +898,42 @@ This should be possible via tidyverse pipeline operations:
 # Grouping the data by run, agent, trial and calculating the average Phi:
 ts_tibble <- tibble(ts_data)
 ts_tibble <- ts_tibble %>% group_by(run, agent, trial)
-avg_phi_data <- ts_tibble %>% summarise(mean(Phi))
-avg_phi_data <- avg_phi_data %>% rename(avg_phi = `mean(Phi)`)
+avg_phi_data <- ts_tibble %>% summarise(mean(Phi), median(Phi), sd(Phi), min(Phi), max(Phi))
+avg_phi_data
+
+avg_phi_data <- avg_phi_data %>% rename(avg_phi = `mean(Phi)`, 
+                                        median_phi = `median(Phi)`, 
+                                        sd_phi = `sd(Phi)`,
+                                        min_phi = `min(Phi)`,
+                                        max_phi = `max(Phi)`)
 
 # Visualizing the distribution of avg. Phi scores:
 ggplot(avg_phi_data, aes(x = avg_phi, fill = "red")) +
   geom_density() +
   theme_minimal() +
-  ggtitle("Fig. 1: Mean Phi distribution across all runs")
+  ggtitle("Fig. 1.1: Mean Phi distribution across all runs")
+
+ggplot(avg_phi_data, aes(x = median_phi, fill = "red")) +
+  geom_density() +
+  theme_minimal() +
+  ggtitle("Fig. 1.2: Median Phi distribution across all runs")
+
+ggplot(avg_phi_data, aes(x = sd_phi, fill = "red")) +
+  geom_density() +
+  theme_minimal() +
+  ggtitle("Fig. 1.3: SD Phi distribution across all runs")
+
+ggplot(avg_phi_data, aes(x = min_phi, fill = "red")) +
+  geom_density() +
+  theme_minimal() +
+  ggtitle("Fig. 1.4: Min Phi distribution across all runs")
+
+ggplot(avg_phi_data, aes(x = max_phi, fill = "red")) +
+  geom_density() +
+  theme_minimal() +
+  ggtitle("Fig. 1.5: Max Phi distribution across all runs")
+
+
 ```
 Commenting on the distribution: 
 
@@ -1029,20 +1057,39 @@ tick_lab <- seq(1:10)
 
 ggplot(final_battery, aes(x = final_battery$stratum, y = final_battery$avg_phi, color = final_battery$task_type)) + 
   geom_point(alpha = 0.7, size = 2) + 
-  ggtitle("Fig. 3: Avg. Phi for each strata in the stimuli battery") +
+  ggtitle("Fig. 3.1: Avg. Phi for each strata in the stimuli battery") +
   labs(color = "Task type") +
   xlab("Stratum") + 
   ylab("Avg. Phi") +
   scale_x_discrete(labels = tick_lab) +
   theme_minimal()
 
+ggplot(final_battery, aes(x = final_battery$stratum, y = final_battery$sd_phi, color = final_battery$task_type)) + 
+  geom_point(alpha = 0.7, size = 2) + 
+  ggtitle("Fig. 3.2: Phi SD for each strata in the stimuli battery") +
+  labs(color = "Task type") +
+  xlab("Stratum") + 
+  ylab("SD Phi") +
+  scale_x_discrete(labels = tick_lab) +
+  theme_minimal()
+
+ggplot(final_battery, aes(x = final_battery$stratum, y = final_battery$median_phi, color = final_battery$task_type)) + 
+  geom_point(alpha = 0.7, size = 2) + 
+  ggtitle("Fig. 3.3: Median Phi for each strata in the stimuli battery") +
+  labs(color = "Task type") +
+  xlab("Stratum") + 
+  ylab("Median Phi") +
+  scale_x_discrete(labels = tick_lab) +
+  theme_minimal()
 ```
 
 ```{r Using looping for the visualization}
 # Removing grouping:
 final_battery <- data_frame(final_battery)
-
 final_battery
+
+# Writing the data:
+write_csv(final_battery, file = paste0("/Users/christianstenbro/Programming/perception_action_exam/data","/final_battery", ".csv")) 
 
 # Setting batch name (creates a folder of the same name in the animation output folder):
 batch <- "batch_9"
