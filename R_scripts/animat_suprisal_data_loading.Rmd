@@ -9,6 +9,11 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+```{r}
+version
+```
+
+
 ## 1. Set-up
 
 ```{r set-up}
@@ -214,6 +219,8 @@ All in all, we should have (128 × 100 × 33) × 121 data points for the entire 
 ```{r}
 128*100*33*121
 nrow(ts_data)
+
+range(ts_data$run)
 ```
 
 ### 3.2 Infering the starting position of each block
@@ -998,6 +1005,8 @@ n_per_stratum <- 5
 sampled_data <- avg_phi_data %>%
   group_by(stratum) %>%
   slice_sample(n = n_per_stratum, replace = FALSE)
+
+sampled_data
 ```
 
 ## 7. Visualizing stimuli battery
@@ -1190,5 +1199,8 @@ sampled_data_batch_8 %>% group_by(stratum, task_type) %>% slice_sample(n = 1)
 
 ts_data %>% filter(run == 36, agent == 62, trial == 102)
 
+```
+```{r}
+ts_data %>% filter(agent == 1)
 ```
 

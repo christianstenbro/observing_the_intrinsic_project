@@ -14,19 +14,24 @@ pacman::p_load(tidyverse,
                janitor)
 ```
 
+# 1. Initial Data Operations
+
+## 1.1 Loading and cleaning data
 
 ```{r}
-data <- read_csv("/Users/christianstenbro/AU/3_sem/Perception_and_Action/Eksamen/Data/betwixt_report_analysis__6599892855253518349_cleaned.csv")
+data <- read_csv("/Users/christianstenbro/AU/3_sem/Perception_and_Action/Projekt/Data/cleaned_betwixt_report_analysis__1086157761143229719_all_data.csv", skip=1)
 
 # Removing the empty rows and irrelevant columns:
-data <- data %>% filter(s1_catch != "NA") %>% select(-`Overall Status`, -...23)
+data <- data %>% filter(s1_catch != "NA") %>% select(-`Overall Status`, -'E-mail') # Note that no mails were collected
 
-# Cleaning names:
+# Cleaning names and renaming variables:
 data <- clean_names(data)
 data <- data %>% rename(qualitative = how_did_you_make_your_rating_you_do_not_have_to_respond)
+
+head(data)
 ```
 
-```{r}
+```{r Additional cleaning}
 # Adding an ID column: 
 subj_id <- factor(seq(1:nrow(data)))
 data <- cbind(subj_id, data)
@@ -44,6 +49,7 @@ data_long <- cbind(data_long, task_type)
 data_long <- tibble(data_long)
 head(data_long)
 ```
+## 1.2 Initial visualizations
 ```{r}
 # Initial visualization
 tick_lab <- seq(1:length(unique(data_long$variable)))
@@ -71,10 +77,10 @@ data_long %>% filter(task_type == "avoid") %>%
 #   geom_boxplot() +
 #   scale_x_discrete(labels = tick_lab)
 ```
-There is definitely something systematic going on, but I don't think it relates to Phi at all (since Phi is the organizing principle on the x-axis). 
+There is definitely something systematic going on, but I don't think it necessarily relates to Phi (since Phi is the organizing principle on the x-axis). At least there is no visible trend in the direction of the hypothesis. 
 
-```{r}
-
+## 1.3 Merging the experimental data with phi statistics from the stimuli time series data
+```{r Merging data frame with phi statistics and saving data objects to files}
 # Loading the final battery data frame:
 battery_data <- read_csv("/Users/christianstenbro/Programming/perception_action_exam/data/final_battery.csv")
 
@@ -82,13 +88,283 @@ battery_data <- read_csv("/Users/christianstenbro/Programming/perception_action_
 
 ## Extracting variable names:
 variable_names <- unique(data_long$variable)
+variable <- variable_names
 
 ## Reordering battery data frame and appending variable_names:
-battery_data$stratum <- factor(battery_data$stratum, levels = c("Stratum_1", "Stratum_2", "Stratum_3", "Stratum_4", "Stratum_5", "Stratum_6", "Stratum_7", "Stratum_8", "Stratum_9", "Stratum_10"))
-battery_data <- arrange(battery_data, by = stratum)
+battery_data$stratum <- factor(battery_data$stratum, levels = c("Stratum_1", 
+                                                                "Stratum_2", 
+                                                                "Stratum_3", 
+                                                                "Stratum_4", 
+                                                                "Stratum_5", 
+                                                                "Stratum_6", 
+                                                                "Stratum_7", 
+                                                                "Stratum_8", 
+                                                                "Stratum_9", 
+                                                                "Stratum_10"))
+battery_data <- arrange(battery_data, by = stratum, desc(task_type))
+
+## Adding variable names for binding
+battery_data <- cbind(battery_data, variable)
+
+## Converting binding variables to factors
+battery_data$variable <- factor(battery_data$variable)
+levels(battery_data$variable)
+
+data_long$variable <- factor(data_long$variable)
+levels(data_long$variable)
+
+colnames(data_long)
+colnames(battery_data)
+
+## Merging the stimuli data (statistics regarding phi for each trial) with the data from the experiment:
+merged_data <- merge(data_long, battery_data, by = c("variable"))
+
+merged_data <- merged_data %>% arrange(subj_id, variable)
+
+merged_data <- merged_data %>% 
+  select(-task_type.y) %>% 
+  rename("task_type" = task_type.x) %>% 
+  relocate(subj_id, .before = variable)
+
+head(merged_data)
+
+merged_data$stratum <- factor(merged_data$stratum, levels = c("Stratum_1", 
+                                                                "Stratum_2", 
+                                                                "Stratum_3", 
+                                                                "Stratum_4", 
+                                                                "Stratum_5", 
+                                                                "Stratum_6", 
+                                                                "Stratum_7", 
+                                                                "Stratum_8", 
+                                                                "Stratum_9", 
+                                                                "Stratum_10"))
+merged_data <- merged_data %>% arrange(subj_id, stratum)
+
+merged_data <- merged_data %>% rename("phi_rating" = value)
+
+# Saving the merged data:
+write_csv(merged_data, 
+          file = paste0("/Users/christianstenbro/Programming/perception_action_exam/data","/merged_data", ".csv")
+          )
+
+# Saving the qualitative ratings:
+qualitative_statements <- unique(merged_data$qualitative)[2:11] # the first row is NA
+
+write(qualitative_statements, 
+          file = paste0("/Users/christianstenbro/Programming/perception_action_exam/data","/qualitative_statements", ".txt")
+      )
+```
+
+## 1.4 Plotting standardized consciousness ratings (named phi_rating in the data frame) against actual avg_phi value
+
+```{r}
+# Standardizing the phi_ratings:
+merged_data_2 <- merged_data
+merged_data_2$phi_rating <- scale(merged_data_2$phi_rating)
+```
+
+```{r}
+# GG plot visualizations:
+merged_data_2 %>% 
+  ggplot(aes(x = phi_rating, y = avg_phi, color = task_type)) +
+  geom_point() + 
+  ggtitle("")
+
+merged_data_2 %>% 
+  ggplot(aes(x = phi_rating)) +
+  geom_density()
+```
+
+# 2. Fitting Linear Regression Models
+
+In this section, different linear regression models are fitted to gain an estimate of systematic variation in the rating of phi according to the actual value of phi for each observation (individual rating) in the online experiment. 
+
+Concretely, a sequence of linear regression models are fitted to predict the actual phi value based on the ratings of phi. The models includes task_type as an additional predictor to account for possible systematic variations caused by the different task types. 
+
+## 2.1 Simple Linear Regression Models
+
+```{r}
+# Defining formulas:
+formula_1 <- avg_phi ~ phi_rating + task_type + (1|subj_id)
+formula_2 <- avg_phi ~ phi_rating + task_type
+
+# Fitting models:
+mdl_1 <- lme4::lmer(formula_1, data = merged_data_2)
+mdl_2 <- lm(formula = formula_2, data = merged_data_2)
+
+# Reading summaries:
+summary(mdl_1)
+summary(mdl_2)
+```
+
+We can plot the regression line, e.g., from Mdl_2:
+
+```{r}
+plot(merged_data_2$phi_rating, merged_data_2$avg_phi,
+     xlab = "Experimental Phi Rating (Standardized)",
+     ylab = "Actual Phi Average Value")
+b_hat <- coef(mdl_2)
+abline(a = b_hat[1], b = b_hat[2], col = "black")
+```
+Commenting on the models:
+
+None of these models are especially good to use: Mdl_1 accounts for the repeated measures experimental design by modelling random intercepts for the different subjects. However, the fitting procedure returns an 'is singular' warning, possibly because there is not enough data points for this complicated model. 
+
+Hence, the simpler Mdl_2 is fitted. The problem here is that it does not model the repeated measures design, violating the assumption of independence of error. 
+
+Instead of using these models, I will move on to fitting a linear mixed effects regression model using Bayesian methods (stan_glmer).
+
+## 2.2 Fitting a Bayesian regression model
+
+```{r}
+# Fitting a Bayesian mixed effects model using stan_glmer (with no specified prior, that is a weakly informative prior):
+mdl_3 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data_2, refresh = 0)
+print(mdl_3)
+
+# Extracting coefficients and computing a mean slope for the phi_rating coefficient + intercept:
+coef_mdl_3 <- coef(mdl_3)
+mean_slope_mdl_3 <- mean(coef_mdl_3$subj_id[2]$phi_rating)
+mean_intercept_mdl_3 <- mean(coef_mdl_3$subj_id[1]$`(Intercept)`) 
+
+# Plotting a random selection of estimated regression lines (using a script modeled on the one shown on pp. 156-157 in Gelman et al., 2020):
+print(mdl_5)
+sims_3 <- as.matrix(mdl_3)
+n_sims_3 <- nrow(sims_3)
+subset <- sample(n_sims_3, 20)
+plot(merged_data_2$phi_rating, merged_data_2$avg_phi,
+     xlab="Experimental Phi Rating (Standardized)", ylab="Actual Phi Average Value")
+for (i in subset){
+  abline(sims_3[i,1] + sims_3[i,3], sims_3[i,2], col="grey")
+}
+abline(a = mean_intercept_mdl_3, mean_slope_mdl_3, col = "blue")
+
+# Extracting confidence intervals or uncertainty intervals for the phi rating slope from mdl_3:
+CI_mdl_3 <- quantile(sims_3[,2], c(0.025, 0.975))
+
+# Seeing the distribution of estimates:
+sims_3_df <- data.frame(sims_3)
+
+# Plotting the distribution of estimates:
+ggplot(data = sims_3_df, aes(x = phi_rating)) +
+  geom_density(fill = "blue", alpha = 0.2) +
+  geom_vline(xintercept = mean(sims_3_df$phi_rating)) +
+  geom_vline(xintercept = CI_mdl_3[[1]], linetype = "dashed") +
+  geom_vline(xintercept = CI_mdl_3[[2]], linetype = "dashed") +
+  annotate("text", x = c(-0.35, -0.265, -0.185), y = 10, label = c("-2 SE", "Mean", "+2 SE"),
+           color = "Black", vjust = 0, size = 3)
+```
+
+```{r}
+# Plotting the residuals:
+plot(merged_data_2$phi_rating, residuals(mdl_3),
+     xlab = "Experimental Phi Rating (Standardized)",
+     ylab = "Model 3 Residuals")
+abline(a = mean(residuals(mdl_3)) + sd(residuals(mdl_3)), b = 0, col = "grey")
+abline(a = mean(residuals(mdl_3)), b = 0)
+abline(a = mean(residuals(mdl_3)) - sd(residuals(mdl_3)), b = 0, col = "grey")
+```
+
+## 2.3 Fitting a model with flat priors
+
+Model 3 had weakly informative (default setting) priors. It would be interesting to see how a model with flat priors work: 
+
+```{r}
+mdl_4 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data = merged_data_2, refresh = 0, prior_intercept = NULL, prior = NULL, prior_aux = NULL)
+print(mdl_4)
+```
+
+Judging from the summary statistics, the Bayesian model seems to reach similar estimates regardless of having been given flat priors.
 
 
-cbind(battery_data, variable_names)
+
+# References
+
+Gelman, A., Hill, J., & Vehtari, A. (2020). Regression and Other Stories (1st ed.). Cambridge University Press. https://doi.org/10.1017/9781139161879
+
+
+
+# Cut out
+
+```{r}
+# Checking model fit using simulation
+
+sims <- as.matrix(mdl_5)
+dim(sims)
+
+n_sims <- nrow(sims)
+
+n <- length(merged_data_2$avg_phi)
+y_rep <- posterior_predict(mdl_5)
+
+par(mfrow = c(2,3))
+for (s in sample(n_sims, 6)) {
+  hist(y_rep[s, ])
+}
+
 ```
 
 
+```{r}
+# Experimenting with individual standardization
+
+merged_data_3 <- merged_data %>% group_by(subj_id)
+
+merged_data_3 <- merged_data_3 %>% mutate(standardized_phi_rating =  scale(phi_rating))
+
+plot(merged_data_3$standardized_phi_rating, merged_data_3$avg_phi)
+
+merged_data_3 %>% select(subj_id, standardized_phi_rating, avg_phi, task_type) %>% 
+  ggplot(aes(x = standardized_phi_rating, y = avg_phi, color = subj_id)) + 
+  geom_point() +
+  facet_wrap(~task_type)
+```
+
+
+```{r}
+# Defining a mixed effects model fitted using stan_glmer:
+mdl_3 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data_2, refresh = 0)
+print(mdl_3)
+
+# Plotting the model
+print(mdl_3)
+sims_2 <- as.matrix(mdl_3)
+n_sims_2 <- nrow(sims_2)
+subset <- sample(n_sims_2, 10)
+plot(merged_data_2$phi_rating, merged_data_2$avg_phi,
+     xlab="Experimental Phi Rating (Standardized)", ylab="Actual Phi Average Value")
+for (i in subset){
+  abline(sims_2[i,1], sims_2[i,2], col="gray")
+}
+# abline(coef(mdl_3)[1], coef(mdl_3)[2], col="black") # this will not work as there is 15 slopes technically
+
+mdl_3
+```
+
+```{r}
+# Same model but unstandardized:
+
+# Wait a second, we might need to use stan? At least this converges . . . 
+mdl_4 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data, refresh = 0)
+print(mdl_4)
+
+coef_mdl_4 <- coef(mdl_4)
+mean_slope <- mean(coef_mdl_4$subj_id[2]$phi_rating)
+mean_intercept <- mean(coef_mdl_4$subj_id[1]$`(Intercept)`) 
+
+# Plotting the model
+print(mdl_4)
+sims_2 <- as.matrix(mdl_4)
+n_sims_2 <- nrow(sims_2)
+subset <- sample(n_sims_2, 20)
+plot(merged_data$phi_rating, merged_data$avg_phi,
+     xlab="Experimental Phi Rating", ylab="Actual Phi Average Value")
+for (i in subset){
+  abline(sims_2[i,1] + sims_2[i,3], sims_2[i,2], col="grey", alpha = 0.5)
+}
+abline(a = mean_intercept, mean_slope, col = "red")
+# for (i in subset){
+#   abline(sims_2[i,1], sims_2[i,2], col="black")
+# }
+# abline(coef(mdl_3)[1], coef(mdl_3)[2], col="black") # this will not work as there is 15 slopes technically
+
+```
