@@ -11,7 +11,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 pacman::p_load(tidyverse, 
-               janitor)
+               janitor, 
+               rstanarm)
 ```
 
 # 1. Initial Data Operations
@@ -227,7 +228,7 @@ mean_slope_mdl_3 <- mean(coef_mdl_3$subj_id[2]$phi_rating)
 mean_intercept_mdl_3 <- mean(coef_mdl_3$subj_id[1]$`(Intercept)`) 
 
 # Plotting a random selection of estimated regression lines (using a script modeled on the one shown on pp. 156-157 in Gelman et al., 2020):
-print(mdl_5)
+print(mdl_3)
 sims_3 <- as.matrix(mdl_3)
 n_sims_3 <- nrow(sims_3)
 subset <- sample(n_sims_3, 20)
@@ -250,6 +251,8 @@ ggplot(data = sims_3_df, aes(x = phi_rating)) +
   geom_vline(xintercept = mean(sims_3_df$phi_rating)) +
   geom_vline(xintercept = CI_mdl_3[[1]], linetype = "dashed") +
   geom_vline(xintercept = CI_mdl_3[[2]], linetype = "dashed") +
+  labs(x = "phi_rating coefficient estimate") +
+  ggtitle("Posterior Distribution of Phi Rating Coefficient Estimates from Model 3", subtitle = "with Confidende Intervals") +
   annotate("text", x = c(-0.35, -0.265, -0.185), y = 10, label = c("-2 SE", "Mean", "+2 SE"),
            color = "Black", vjust = 0, size = 3)
 ```
@@ -276,6 +279,158 @@ print(mdl_4)
 Judging from the summary statistics, the Bayesian model seems to reach similar estimates regardless of having been given flat priors.
 
 
+# 3. New alternative regression model using direction switches
+
+Based on the qualitative reports from the experiment, it seems that many participants based their consciousness ratings on the animat's direction switching behavior (which might not be directly related to phi). It would be interesting to make a new regression analysis using direction switch as the independent variable and the consciousness rating as the predictor. 
+
+## 3.1 Computing direction switches
+
+```{r}
+task_4_data <- read_csv(file = "/Users/christianstenbro/AU/3_sem/Perception_and_Action/Integrated Information Theory/phi-surprisal/processed_data/timestep_data_task4.csv")
+```
+
+```{r}
+# Extracting the timestep data for the specific runs constituting the stimuli battery:
+timestep_subset_loop <- data.frame()
+
+for (i in seq(1:nrow(battery_data))){
+  subset_data <- filter(.data = task_4_data, 
+                            run == battery_data$run[i], 
+                            agent == battery_data$agent[i],
+                            trial == battery_data$trial[i])
+  timestep_subset_loop <- rbind(timestep_subset_loop, subset_data)
+}
+
+timestep_subset <- timestep_subset_loop
+
+timestep_subset
+
+```
+
+```{r}
+# Assigning unique identifier:
+id <- data.frame(rep(1:20, each = 33))
+
+nrow(timestep_subset)
+nrow(id)
+
+timestep_subset <- cbind(timestep_subset, id)
+timestep_subset <- timestep_subset %>% rename(id = rep.1.20..each...33.)
+timestep_subset <- timestep_subset %>% relocate(id, .before = run)
+
+# Computing direction switches:
+timestep_subset <- timestep_subset %>% 
+  mutate(movement_state = ifelse(M1 == 1 & M2 == 1, 0,
+                                 ifelse(M1 == 1 | M2 ==1, 1, 0)))
+timestep_subset <- timestep_subset %>%
+  group_by(group = rep(1:ceiling(n()/33), each = 33, length.out = n())) %>%
+  mutate(movement_sequence = data.table::rleid(movement_state))
+
+direction_changes <- timestep_subset %>%
+  filter(movement_state == 1) %>%
+  group_by(id) %>% 
+  summarise(total_direction_changes = n_distinct(movement_sequence))
+
+# Extracting the run, agent, trial information:
+timestep_subset_one_in_each <- timestep_subset %>% 
+  group_by(id) %>% 
+  sample_n(1) %>% 
+  ungroup() %>% 
+  select(id, run, agent, trial)
+
+timestep_subset_direction <- timestep_subset_one_in_each %>% 
+  left_join(direction_changes, by = "id")
+
+# Merging this with the (standardized) experimental data:
+merged_data_2_direction <- left_join(merged_data_2, timestep_subset_direction, by = c("run", "agent", "trial"))
+```
+
+Now we can plot the ratings against total direction changes:
+
+```{r}
+merged_data_2_direction %>% 
+  ggplot(aes(x = phi_rating, y = total_direction_changes, color = variable)) +
+  geom_point()
+```
+Which also does not reveal any immediate pattern.
+
+## 3.2 Regression
+
+```{r}
+
+mdl_5 <- stan_glmer(total_direction_changes ~ phi_rating + task_type + (1|subj_id), data = merged_data_2_direction, refresh = 0)
+
+mdl_6 <- stan_glmer(total_direction_changes ~ phi_rating * task_type + (1|subj_id), data = merged_data_2_direction, refresh = 0)
+
+print(mdl_5)
+
+print(mdl_6)
+```
+
+```{r}
+# Extracting coefficients and computing a mean slope for the phi_rating coefficient + intercept:
+coef_mdl_5 <- coef(mdl_5)
+mean_slope_mdl_5 <- mean(coef_mdl_5$subj_id[2]$phi_rating)
+mean_intercept_mdl_5 <- mean(coef_mdl_5$subj_id[1]$`(Intercept)`)
+mean_type_mdl_5 <- mean(coef_mdl_5$subj_id[3]$task_typecatch)
+
+# Plotting a random selection of estimated regression lines (using a script modeled on the one shown on pp. 156-157 in Gelman et al., 2020):
+sims_5 <- as.matrix(mdl_5)
+n_sims_5 <- nrow(sims_5)
+subset <- sample(n_sims_5, 20)
+plot(merged_data_2_direction$phi_rating, merged_data_2_direction$total_direction_changes,
+     xlab="Experimental Phi Rating (Standardized)", 
+     ylab="Total Direction Changes",
+     main = "Regression Line Samples, Model 5 \nTask Type = Catch")
+for (i in subset){
+  abline(sims_5[i,1] + sims_5[i,3], sims_5[i,2], col="grey")
+}
+abline(a = mean_intercept_mdl_5 + sims_5[i,3], mean_slope_mdl_5, col = "blue")
+
+# Plotting mean of regression lines for both task types:
+colors <- ifelse(merged_data_2_direction$task_type=="catch", "blue", "red")
+plot(merged_data_2_direction$phi_rating, merged_data_2_direction$total_direction_changes,
+     xlab = "Experimental Phi Rating (Standardized)", 
+     ylab = "Total Direction Changes", 
+     main = "Mean Regression Lines, Model 5 \nCatch = Blue, Avoid = Red",
+     col = colors)
+abline(a = mean_intercept_mdl_5 + mean_type_mdl_5, mean_slope_mdl_5, col = "blue")
+abline(a = mean_intercept_mdl_5, mean_slope_mdl_5, col = "red")
+
+# Extracting confidence intervals or uncertainty intervals for the phi rating slope from mdl_3:
+CI_mdl_5 <- quantile(sims_5[,2], c(0.025, 0.975))
+
+# Seeing the distribution of estimates:
+sims_5_df <- data.frame(sims_5)
+
+# Plotting the distribution of estimates:
+ggplot(data = sims_5_df, aes(x = phi_rating)) +
+  geom_density(fill = "blue", alpha = 0.2) +
+  geom_vline(xintercept = mean(sims_5_df$phi_rating)) +
+  geom_vline(xintercept = CI_mdl_5[[1]], linetype = "dashed") +
+  geom_vline(xintercept = CI_mdl_5[[2]], linetype = "dashed") +
+  labs(x = "phi_rating coefficient estimate") +
+  ggtitle("Posterior Distribution of Phi Rating Coefficient Estimates from Model 5", subtitle = "with Confidende Intervals") +
+  annotate("text", x = c(0.8, 1.18, 1.53), y = 2.5, label = c("-2 SE", "Mean", "+2 SE"),
+           color = "Black", vjust = 0, size = 3)
+```
+
+# 4. Evaluating model fit
+
+The last thing that would be good to do is to estimate the fit, e.g., by looking into sigma (which is rather large?)
+
+```{r}
+sigma(mdl_3)
+sigma(mdl_5) # Of course, this is truly a different scale . . .
+```
+
+Maybe the best approach here is to make simulated distributions with the parameters estimated by the model, and then run the models again on that data to see how well it recovers the parameters.
+
+## 4.1 Simulating new distributions based on the model's estimated parameters
+
+
+
+
 
 # References
 
@@ -283,88 +438,95 @@ Gelman, A., Hill, J., & Vehtari, A. (2020). Regression and Other Stories (1st ed
 
 
 
+
+
+
+
+
+
+
 # Cut out
 
 ```{r}
 # Checking model fit using simulation
-
-sims <- as.matrix(mdl_5)
-dim(sims)
-
-n_sims <- nrow(sims)
-
-n <- length(merged_data_2$avg_phi)
-y_rep <- posterior_predict(mdl_5)
-
-par(mfrow = c(2,3))
-for (s in sample(n_sims, 6)) {
-  hist(y_rep[s, ])
-}
+# 
+# sims <- as.matrix(mdl_5)
+# dim(sims)
+# 
+# n_sims <- nrow(sims)
+# 
+# n <- length(merged_data_2$avg_phi)
+# y_rep <- posterior_predict(mdl_5)
+# 
+# par(mfrow = c(2,3))
+# for (s in sample(n_sims, 6)) {
+#   hist(y_rep[s, ])
+# }
 
 ```
 
 
 ```{r}
 # Experimenting with individual standardization
-
-merged_data_3 <- merged_data %>% group_by(subj_id)
-
-merged_data_3 <- merged_data_3 %>% mutate(standardized_phi_rating =  scale(phi_rating))
-
-plot(merged_data_3$standardized_phi_rating, merged_data_3$avg_phi)
-
-merged_data_3 %>% select(subj_id, standardized_phi_rating, avg_phi, task_type) %>% 
-  ggplot(aes(x = standardized_phi_rating, y = avg_phi, color = subj_id)) + 
-  geom_point() +
-  facet_wrap(~task_type)
+# 
+# merged_data_3 <- merged_data %>% group_by(subj_id)
+# 
+# merged_data_3 <- merged_data_3 %>% mutate(standardized_phi_rating =  scale(phi_rating))
+# 
+# plot(merged_data_3$standardized_phi_rating, merged_data_3$avg_phi)
+# 
+# merged_data_3 %>% select(subj_id, standardized_phi_rating, avg_phi, task_type) %>% 
+#   ggplot(aes(x = standardized_phi_rating, y = avg_phi, color = subj_id)) + 
+#   geom_point() +
+#   facet_wrap(~task_type)
 ```
 
 
 ```{r}
-# Defining a mixed effects model fitted using stan_glmer:
-mdl_3 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data_2, refresh = 0)
-print(mdl_3)
-
-# Plotting the model
-print(mdl_3)
-sims_2 <- as.matrix(mdl_3)
-n_sims_2 <- nrow(sims_2)
-subset <- sample(n_sims_2, 10)
-plot(merged_data_2$phi_rating, merged_data_2$avg_phi,
-     xlab="Experimental Phi Rating (Standardized)", ylab="Actual Phi Average Value")
-for (i in subset){
-  abline(sims_2[i,1], sims_2[i,2], col="gray")
-}
-# abline(coef(mdl_3)[1], coef(mdl_3)[2], col="black") # this will not work as there is 15 slopes technically
-
-mdl_3
+# # Defining a mixed effects model fitted using stan_glmer:
+# mdl_3 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data_2, refresh = 0)
+# print(mdl_3)
+# 
+# # Plotting the model
+# print(mdl_3)
+# sims_2 <- as.matrix(mdl_3)
+# n_sims_2 <- nrow(sims_2)
+# subset <- sample(n_sims_2, 10)
+# plot(merged_data_2$phi_rating, merged_data_2$avg_phi,
+#      xlab="Experimental Phi Rating (Standardized)", ylab="Actual Phi Average Value")
+# for (i in subset){
+#   abline(sims_2[i,1], sims_2[i,2], col="gray")
+# }
+# # abline(coef(mdl_3)[1], coef(mdl_3)[2], col="black") # this will not work as there is 15 slopes technically
+# 
+# mdl_3
 ```
 
 ```{r}
 # Same model but unstandardized:
 
 # Wait a second, we might need to use stan? At least this converges . . . 
-mdl_4 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data, refresh = 0)
-print(mdl_4)
-
-coef_mdl_4 <- coef(mdl_4)
-mean_slope <- mean(coef_mdl_4$subj_id[2]$phi_rating)
-mean_intercept <- mean(coef_mdl_4$subj_id[1]$`(Intercept)`) 
-
-# Plotting the model
-print(mdl_4)
-sims_2 <- as.matrix(mdl_4)
-n_sims_2 <- nrow(sims_2)
-subset <- sample(n_sims_2, 20)
-plot(merged_data$phi_rating, merged_data$avg_phi,
-     xlab="Experimental Phi Rating", ylab="Actual Phi Average Value")
-for (i in subset){
-  abline(sims_2[i,1] + sims_2[i,3], sims_2[i,2], col="grey", alpha = 0.5)
-}
-abline(a = mean_intercept, mean_slope, col = "red")
+# mdl_4 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data, refresh = 0)
+# print(mdl_4)
+# 
+# coef_mdl_4 <- coef(mdl_4)
+# mean_slope <- mean(coef_mdl_4$subj_id[2]$phi_rating)
+# mean_intercept <- mean(coef_mdl_4$subj_id[1]$`(Intercept)`) 
+# 
+# # Plotting the model
+# print(mdl_4)
+# sims_2 <- as.matrix(mdl_4)
+# n_sims_2 <- nrow(sims_2)
+# subset <- sample(n_sims_2, 20)
+# plot(merged_data$phi_rating, merged_data$avg_phi,
+#      xlab="Experimental Phi Rating", ylab="Actual Phi Average Value")
 # for (i in subset){
-#   abline(sims_2[i,1], sims_2[i,2], col="black")
+#   abline(sims_2[i,1] + sims_2[i,3], sims_2[i,2], col="grey", alpha = 0.5)
 # }
-# abline(coef(mdl_3)[1], coef(mdl_3)[2], col="black") # this will not work as there is 15 slopes technically
+# abline(a = mean_intercept, mean_slope, col = "red")
+# # for (i in subset){
+# #   abline(sims_2[i,1], sims_2[i,2], col="black")
+# # }
+# # abline(coef(mdl_3)[1], coef(mdl_3)[2], col="black") # this will not work as there is 15 slopes technically
 
 ```
