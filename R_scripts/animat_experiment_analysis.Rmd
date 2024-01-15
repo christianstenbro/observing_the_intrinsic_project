@@ -10,9 +10,15 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
+# Loading packages:
 pacman::p_load(tidyverse, 
                janitor, 
                rstanarm)
+
+# Checking versions of R and rstanarm:
+version
+packageVersion("rstanarm")
+
 ```
 
 # 1. Initial Data Operations
@@ -156,22 +162,16 @@ write(qualitative_statements,
       )
 ```
 
-## 1.4 Plotting standardized consciousness ratings (named phi_rating in the data frame) against actual avg_phi value
-
-```{r}
-# Standardizing the phi_ratings:
-merged_data_2 <- merged_data
-merged_data_2$phi_rating <- scale(merged_data_2$phi_rating)
-```
+## 1.4 Plotting consciousness ratings (named phi_rating in the data frame) against actual avg_phi value
 
 ```{r}
 # GG plot visualizations:
-merged_data_2 %>% 
-  ggplot(aes(x = phi_rating, y = avg_phi, color = task_type)) +
+merged_data %>% 
+  ggplot(aes(x = avg_phi, y = phi_rating, color = task_type)) +
   geom_point() + 
   ggtitle("")
 
-merged_data_2 %>% 
+merged_data %>% 
   ggplot(aes(x = phi_rating)) +
   geom_density()
 ```
@@ -186,12 +186,12 @@ Concretely, a sequence of linear regression models are fitted to predict the act
 
 ```{r}
 # Defining formulas:
-formula_1 <- avg_phi ~ phi_rating + task_type + (1|subj_id)
-formula_2 <- avg_phi ~ phi_rating + task_type
+formula_1 <- phi_rating ~ avg_phi + task_type + (1|subj_id)
+formula_2 <- phi_rating ~ avg_phi + task_type
 
 # Fitting models:
-mdl_1 <- lme4::lmer(formula_1, data = merged_data_2)
-mdl_2 <- lm(formula = formula_2, data = merged_data_2)
+mdl_1 <- lme4::lmer(formula_1, data = merged_data)
+mdl_2 <- lm(formula = formula_2, data = merged_data)
 
 # Reading summaries:
 summary(mdl_1)
@@ -201,11 +201,12 @@ summary(mdl_2)
 We can plot the regression line, e.g., from Mdl_2:
 
 ```{r}
-plot(merged_data_2$phi_rating, merged_data_2$avg_phi,
-     xlab = "Experimental Phi Rating (Standardized)",
-     ylab = "Actual Phi Average Value")
+plot(merged_data$avg_phi, merged_data$phi_rating,
+     xlab = "Actual Phi Average Value",
+     ylab = "Consciousness Rating",
+     main = "Regression Line, Model 2 \nTask Type = Catch")
 b_hat <- coef(mdl_2)
-abline(a = b_hat[1], b = b_hat[2], col = "black")
+abline(a = b_hat[1] + b_hat[3], b = b_hat[2], col = "black")
 ```
 Commenting on the models:
 
@@ -218,26 +219,32 @@ Instead of using these models, I will move on to fitting a linear mixed effects 
 ## 2.2 Fitting a Bayesian regression model
 
 ```{r}
+# Setting seed:
+set.seed(33)
+
 # Fitting a Bayesian mixed effects model using stan_glmer (with no specified prior, that is a weakly informative prior):
-mdl_3 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data_2, refresh = 0)
+mdl_3 <- stan_glmer(phi_rating ~ avg_phi + task_type + (1|subj_id), data=merged_data, refresh = 0)
 print(mdl_3)
 
-# Extracting coefficients and computing a mean slope for the phi_rating coefficient + intercept:
+# Extracting coefficients and computing a mean slope for the avg_phi coefficient + intercept:
 coef_mdl_3 <- coef(mdl_3)
-mean_slope_mdl_3 <- mean(coef_mdl_3$subj_id[2]$phi_rating)
+mean_slope_mdl_3 <- mean(coef_mdl_3$subj_id[2]$avg_phi)
 mean_intercept_mdl_3 <- mean(coef_mdl_3$subj_id[1]$`(Intercept)`) 
+mean_type_mdl_3 <- mean(coef_mdl_3$subj_id[3]$task_typecatch)
 
 # Plotting a random selection of estimated regression lines (using a script modeled on the one shown on pp. 156-157 in Gelman et al., 2020):
 print(mdl_3)
 sims_3 <- as.matrix(mdl_3)
 n_sims_3 <- nrow(sims_3)
 subset <- sample(n_sims_3, 20)
-plot(merged_data_2$phi_rating, merged_data_2$avg_phi,
-     xlab="Experimental Phi Rating (Standardized)", ylab="Actual Phi Average Value")
+plot(merged_data_2$avg_phi, merged_data$phi_rating,
+     xlab="Actual Phi Average Value", 
+     ylab="Consciousness Rating",
+     main = "Regression Line Samples, Model 3 \nTask Type = Catch")
 for (i in subset){
   abline(sims_3[i,1] + sims_3[i,3], sims_3[i,2], col="grey")
 }
-abline(a = mean_intercept_mdl_3, mean_slope_mdl_3, col = "blue")
+abline(a = mean_intercept_mdl_3 + mean_type_mdl_3, b = mean_slope_mdl_3, col = "blue")
 
 # Extracting confidence intervals or uncertainty intervals for the phi rating slope from mdl_3:
 CI_mdl_3 <- quantile(sims_3[,2], c(0.025, 0.975))
@@ -246,22 +253,29 @@ CI_mdl_3 <- quantile(sims_3[,2], c(0.025, 0.975))
 sims_3_df <- data.frame(sims_3)
 
 # Plotting the distribution of estimates:
-ggplot(data = sims_3_df, aes(x = phi_rating)) +
+ggplot(data = sims_3_df, aes(x = avg_phi)) +
   geom_density(fill = "blue", alpha = 0.2) +
-  geom_vline(xintercept = mean(sims_3_df$phi_rating)) +
+  geom_vline(xintercept = mean(sims_3_df$avg_phi)) +
   geom_vline(xintercept = CI_mdl_3[[1]], linetype = "dashed") +
   geom_vline(xintercept = CI_mdl_3[[2]], linetype = "dashed") +
-  labs(x = "phi_rating coefficient estimate") +
-  ggtitle("Posterior Distribution of Phi Rating Coefficient Estimates from Model 3", subtitle = "with Confidende Intervals") +
-  annotate("text", x = c(-0.35, -0.265, -0.185), y = 10, label = c("-2 SE", "Mean", "+2 SE"),
+  labs(x = "Avg. Phi Coefficient Estimates") +
+  ggtitle("Posterior Distribution of Avg. Phi Coefficient Estimates from Model 3") +
+  annotate("text", x = c(CI_mdl_3[[1]] + 0.5, mean_slope_mdl_3 + 0.5, CI_mdl_3[[2]] + 0.5), y = 0.25, label = c("-2 SE", "Mean", "+2 SE"),
            color = "Black", vjust = 0, size = 3)
 ```
+```{r}
+# Printing the confidence interval for the phi_rating coefficient:
+round(CI_mdl_3, digits = 3)
+```
+
+
 
 ```{r}
 # Plotting the residuals:
-plot(merged_data_2$phi_rating, residuals(mdl_3),
-     xlab = "Experimental Phi Rating (Standardized)",
-     ylab = "Model 3 Residuals")
+plot(merged_data$avg_phi, residuals(mdl_3),
+     xlab = "Avg. Phi",
+     ylab = "Model 3 Residuals", 
+     main = "Residual Plot, Model 3")
 abline(a = mean(residuals(mdl_3)) + sd(residuals(mdl_3)), b = 0, col = "grey")
 abline(a = mean(residuals(mdl_3)), b = 0)
 abline(a = mean(residuals(mdl_3)) - sd(residuals(mdl_3)), b = 0, col = "grey")
@@ -272,8 +286,11 @@ abline(a = mean(residuals(mdl_3)) - sd(residuals(mdl_3)), b = 0, col = "grey")
 Model 3 had weakly informative (default setting) priors. It would be interesting to see how a model with flat priors work: 
 
 ```{r}
-mdl_4 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data = merged_data_2, refresh = 0, prior_intercept = NULL, prior = NULL, prior_aux = NULL)
+mdl_4 <- stan_glmer(phi_rating ~ avg_phi + task_type + (1|subj_id), data = merged_data, refresh = 0, prior_intercept = NULL, prior = NULL, prior_aux = NULL)
+
+# Comparing the outputs
 print(mdl_4)
+print(mdl_3)
 ```
 
 Judging from the summary statistics, the Bayesian model seems to reach similar estimates regardless of having been given flat priors.
@@ -300,11 +317,8 @@ for (i in seq(1:nrow(battery_data))){
                             trial == battery_data$trial[i])
   timestep_subset_loop <- rbind(timestep_subset_loop, subset_data)
 }
-
 timestep_subset <- timestep_subset_loop
-
-timestep_subset
-
+#timestep_subset
 ```
 
 ```{r}
@@ -342,35 +356,37 @@ timestep_subset_direction <- timestep_subset_one_in_each %>%
   left_join(direction_changes, by = "id")
 
 # Merging this with the (standardized) experimental data:
-merged_data_2_direction <- left_join(merged_data_2, timestep_subset_direction, by = c("run", "agent", "trial"))
+merged_data_direction <- left_join(merged_data, timestep_subset_direction, by = c("run", "agent", "trial"))
 ```
 
 Now we can plot the ratings against total direction changes:
 
 ```{r}
-merged_data_2_direction %>% 
-  ggplot(aes(x = phi_rating, y = total_direction_changes, color = variable)) +
+merged_data_direction %>% 
+  ggplot(aes(x = total_direction_changes, y = phi_rating, color = variable)) +
   geom_point()
+
+merged_data_direction %>% 
+  ggplot(aes(x = total_direction_changes, y = phi_rating, color = subj_id, group = subj_id)) + 
+  geom_line()
 ```
 Which also does not reveal any immediate pattern.
 
 ## 3.2 Regression
 
 ```{r}
-
-mdl_5 <- stan_glmer(total_direction_changes ~ phi_rating + task_type + (1|subj_id), data = merged_data_2_direction, refresh = 0)
-
-mdl_6 <- stan_glmer(total_direction_changes ~ phi_rating * task_type + (1|subj_id), data = merged_data_2_direction, refresh = 0)
+mdl_5 <- stan_glmer(phi_rating ~ total_direction_changes + task_type + (1|subj_id), data = merged_data_direction, refresh = 0)
 
 print(mdl_5)
-
-print(mdl_6)
 ```
 
 ```{r}
+# Setting seed:
+set.seed(33)
+
 # Extracting coefficients and computing a mean slope for the phi_rating coefficient + intercept:
 coef_mdl_5 <- coef(mdl_5)
-mean_slope_mdl_5 <- mean(coef_mdl_5$subj_id[2]$phi_rating)
+mean_slope_mdl_5 <- mean(coef_mdl_5$subj_id[2]$total_direction_changes)
 mean_intercept_mdl_5 <- mean(coef_mdl_5$subj_id[1]$`(Intercept)`)
 mean_type_mdl_5 <- mean(coef_mdl_5$subj_id[3]$task_typecatch)
 
@@ -378,20 +394,20 @@ mean_type_mdl_5 <- mean(coef_mdl_5$subj_id[3]$task_typecatch)
 sims_5 <- as.matrix(mdl_5)
 n_sims_5 <- nrow(sims_5)
 subset <- sample(n_sims_5, 20)
-plot(merged_data_2_direction$phi_rating, merged_data_2_direction$total_direction_changes,
-     xlab="Experimental Phi Rating (Standardized)", 
-     ylab="Total Direction Changes",
+plot(merged_data_direction$total_direction_changes, merged_data_direction$phi_rating,
+     xlab="Total Direction Changes", 
+     ylab="Conciousness Rating",
      main = "Regression Line Samples, Model 5 \nTask Type = Catch")
 for (i in subset){
   abline(sims_5[i,1] + sims_5[i,3], sims_5[i,2], col="grey")
 }
-abline(a = mean_intercept_mdl_5 + sims_5[i,3], mean_slope_mdl_5, col = "blue")
+abline(a = mean_intercept_mdl_5 + mean_type_mdl_5, mean_slope_mdl_5, col = "blue")
 
 # Plotting mean of regression lines for both task types:
-colors <- ifelse(merged_data_2_direction$task_type=="catch", "blue", "red")
-plot(merged_data_2_direction$phi_rating, merged_data_2_direction$total_direction_changes,
-     xlab = "Experimental Phi Rating (Standardized)", 
-     ylab = "Total Direction Changes", 
+colors <- ifelse(merged_data_direction$task_type=="catch", "blue", "red")
+plot(merged_data_direction$total_direction_changes, merged_data_direction$phi_rating,
+     xlab = "Total Direction Changes", 
+     ylab = "Consciousness Rating", 
      main = "Mean Regression Lines, Model 5 \nCatch = Blue, Avoid = Red",
      col = colors)
 abline(a = mean_intercept_mdl_5 + mean_type_mdl_5, mean_slope_mdl_5, col = "blue")
@@ -404,33 +420,163 @@ CI_mdl_5 <- quantile(sims_5[,2], c(0.025, 0.975))
 sims_5_df <- data.frame(sims_5)
 
 # Plotting the distribution of estimates:
-ggplot(data = sims_5_df, aes(x = phi_rating)) +
+ggplot(data = sims_5_df, aes(x = total_direction_changes)) +
   geom_density(fill = "blue", alpha = 0.2) +
-  geom_vline(xintercept = mean(sims_5_df$phi_rating)) +
+  geom_vline(xintercept = mean(sims_5_df$total_direction_changes)) +
   geom_vline(xintercept = CI_mdl_5[[1]], linetype = "dashed") +
   geom_vline(xintercept = CI_mdl_5[[2]], linetype = "dashed") +
-  labs(x = "phi_rating coefficient estimate") +
-  ggtitle("Posterior Distribution of Phi Rating Coefficient Estimates from Model 5", subtitle = "with Confidende Intervals") +
-  annotate("text", x = c(0.8, 1.18, 1.53), y = 2.5, label = c("-2 SE", "Mean", "+2 SE"),
+  ggtitle("Posterior Distribution of Total Dir. Changes Coefficient Estimates from Model 5") +
+  labs(x = "Total Direction Changes Coefficient Estimate") +
+  #ggtitle("Posterior Distribution of Total Direction Changes Coefficient Estimates from Model 5") +
+  annotate("text", x = c(CI_mdl_5[[1]] + 0.1, mean_slope_mdl_5 + 0.1, CI_mdl_5[[2]] - 0.1), y = 1.3, label = c("-2 SE", "Mean", "+2 SE"),
            color = "Black", vjust = 0, size = 3)
 ```
 
 # 4. Evaluating model fit
 
-The last thing that would be good to do is to estimate the fit, e.g., by looking into sigma (which is rather large?)
+The last thing that would be good to do is to evaluate the fit, e.g., by looking into sigma (which is rather large?)
 
 ```{r}
+# Printing mdl summaries:
+print(mdl_3)
+print(mdl_5)
+
+# Printing sigma
 sigma(mdl_3)
-sigma(mdl_5) # Of course, this is truly a different scale . . .
+sigma(mdl_5)
+
+# Printing coefficient CI:
+print("Mdl_3 CI:")
+CI_mdl_3
+print("Mdl_5 CI:")
+CI_mdl_5
 ```
 
 Maybe the best approach here is to make simulated distributions with the parameters estimated by the model, and then run the models again on that data to see how well it recovers the parameters.
 
-## 4.1 Simulating new distributions based on the model's estimated parameters
+## 4.1 Predicting for new hypothetical data points based on mdl_3 to get a sense for the uncertainty in the model
+
+Trying out some prediction stuff:
+
+```{r Predictions based on mdl_3 with medium value of phi}
+# Setting seed:
+set.seed(33)
+
+# Setting parameters and saving as new data objects:
+subj_id = 1
+avg_phi = 1
+task_type = "avoid"
+new <- data.frame(subj_id, avg_phi, task_type)
+
+# Predicting from the posterior distribution, mdl_3:
+y_post_pred <- posterior_predict(mdl_3, newdata = new)
+
+# Computing statistics and plotting the distribution of possible of consciousness ratings based on the new data and model 3:
+mean(y_post_pred)
+sd(y_post_pred)
+
+plot(density(y_post_pred),
+     main = "Uncertainty of a Model 3 Prediction \n New data point of task type 'avoid', with avg. phi = 1", 
+     cex.main = 0.9,
+     xlab = "Consciousness Rating Value Prediction",
+     cex.lab = 0.8)
+```
+```{r Predictions based on mdl_3 with max value of phi}
+# Setting seed:
+set.seed(33)
+
+# Setting parameters and saving as new data objects:
+subj_id = 1
+avg_phi = max(merged_data$avg_phi)
+task_type = "avoid"
+new <- data.frame(subj_id, avg_phi, task_type)
+
+print(round(avg_phi, digits = 3))
+
+# Predicting from the posterior distribution, mdl_3:
+y_post_pred <- posterior_predict(mdl_3, newdata = new)
+
+# Computing statistics and plotting the distribution of possible of consciousness ratings based on the new data and model 3:
+mean(y_post_pred)
+sd(y_post_pred)
+
+plot(density(y_post_pred),
+     main = "Uncertainty of a Model 3 Prediction \n New data point of task type 'avoid', with avg. phi = 2.519", 
+     cex.main = 0.9,
+     xlab = "Consciousness Rating Value Prediction",
+     cex.lab = 0.8)
+```
 
 
+```{r Predictions based on mdl_5, low number of direction changes}
+# Setting seed:
+set.seed(33)
 
+# Setting parameters and saving as new data objects:
+subj_id = 1
+total_direction_changes = 1
+task_type = "avoid"
+new <- data.frame(subj_id, total_direction_changes, task_type)
 
+# Predicting from the posterior distribution, mdl_5:
+y_post_pred <- posterior_predict(mdl_5, newdata = new)
+
+# Computing statistics and plotting the distribution of possible of consciousness ratings based on the new data and model 3:
+mean(y_post_pred)
+sd(y_post_pred)
+
+plot(density(y_post_pred),
+     main = "Uncertainty of a Model 5 Prediction \n New data point of task type 'avoid', with total direction changes = 1", 
+     cex.main = 0.9,
+     xlab = "Consciousness Rating Value Prediction",
+     cex.lab = 0.8)
+```
+```{r Predictions based on mdl_5, max number of direction changes}
+# Setting seed:
+set.seed(33)
+
+# Setting parameters and saving as new data objects:
+subj_id = 1
+total_direction_changes = max(merged_data_direction$total_direction_changes)
+task_type = "avoid"
+new <- data.frame(subj_id, total_direction_changes, task_type)
+
+# Predicting from the posterior distribution, mdl_5:
+y_post_pred <- posterior_predict(mdl_5, newdata = new)
+
+# Computing statistics and plotting the distribution of possible of consciousness ratings based on the new data and model 3:
+mean(y_post_pred)
+sd(y_post_pred)
+
+plot(density(y_post_pred),
+     main = "Uncertainty of a Model 5 Prediction \n New data point of task type 'avoid', with total direction changes = 12", 
+     cex.main = 0.9,
+     xlab = "Consciousness Rating Value Prediction",
+     cex.lab = 0.8)
+```
+
+## 4.2 Estimating explained variance using Bayesian R2 (pp. 170-171 in Gelman et al.)
+
+```{r}
+# Setting seed:
+set.seed(33)
+
+# Computing Bayesian R2:
+mdl_3_R2 <- bayes_R2(mdl_3)
+mdl_5_R2 <- bayes_R2(mdl_5)
+
+# Printing R2 statistics:
+cat("R2 median and SD (rounded to 3 digits):\n\n",
+    "Median R2 mdl_3: ", round(median(mdl_3_R2), 3), 
+    "\nSD of R2: ", round(sd(mdl_3_R2), 3),
+    "\n\nMedian R2 mdl_5: ", round(median(mdl_5_R2), 3),
+    "\nSD of R2: ", round(sd(mdl_5_R2), 3), "\n"
+    )
+
+# Cross validation (could be relevant for model selection, but I haven't really done any quantitative model selection)
+loo(mdl_5)
+loo(mdl_3)
+```
 
 # References
 
@@ -438,95 +584,3 @@ Gelman, A., Hill, J., & Vehtari, A. (2020). Regression and Other Stories (1st ed
 
 
 
-
-
-
-
-
-
-
-# Cut out
-
-```{r}
-# Checking model fit using simulation
-# 
-# sims <- as.matrix(mdl_5)
-# dim(sims)
-# 
-# n_sims <- nrow(sims)
-# 
-# n <- length(merged_data_2$avg_phi)
-# y_rep <- posterior_predict(mdl_5)
-# 
-# par(mfrow = c(2,3))
-# for (s in sample(n_sims, 6)) {
-#   hist(y_rep[s, ])
-# }
-
-```
-
-
-```{r}
-# Experimenting with individual standardization
-# 
-# merged_data_3 <- merged_data %>% group_by(subj_id)
-# 
-# merged_data_3 <- merged_data_3 %>% mutate(standardized_phi_rating =  scale(phi_rating))
-# 
-# plot(merged_data_3$standardized_phi_rating, merged_data_3$avg_phi)
-# 
-# merged_data_3 %>% select(subj_id, standardized_phi_rating, avg_phi, task_type) %>% 
-#   ggplot(aes(x = standardized_phi_rating, y = avg_phi, color = subj_id)) + 
-#   geom_point() +
-#   facet_wrap(~task_type)
-```
-
-
-```{r}
-# # Defining a mixed effects model fitted using stan_glmer:
-# mdl_3 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data_2, refresh = 0)
-# print(mdl_3)
-# 
-# # Plotting the model
-# print(mdl_3)
-# sims_2 <- as.matrix(mdl_3)
-# n_sims_2 <- nrow(sims_2)
-# subset <- sample(n_sims_2, 10)
-# plot(merged_data_2$phi_rating, merged_data_2$avg_phi,
-#      xlab="Experimental Phi Rating (Standardized)", ylab="Actual Phi Average Value")
-# for (i in subset){
-#   abline(sims_2[i,1], sims_2[i,2], col="gray")
-# }
-# # abline(coef(mdl_3)[1], coef(mdl_3)[2], col="black") # this will not work as there is 15 slopes technically
-# 
-# mdl_3
-```
-
-```{r}
-# Same model but unstandardized:
-
-# Wait a second, we might need to use stan? At least this converges . . . 
-# mdl_4 <- stan_glmer(avg_phi ~ phi_rating + task_type + (1|subj_id), data=merged_data, refresh = 0)
-# print(mdl_4)
-# 
-# coef_mdl_4 <- coef(mdl_4)
-# mean_slope <- mean(coef_mdl_4$subj_id[2]$phi_rating)
-# mean_intercept <- mean(coef_mdl_4$subj_id[1]$`(Intercept)`) 
-# 
-# # Plotting the model
-# print(mdl_4)
-# sims_2 <- as.matrix(mdl_4)
-# n_sims_2 <- nrow(sims_2)
-# subset <- sample(n_sims_2, 20)
-# plot(merged_data$phi_rating, merged_data$avg_phi,
-#      xlab="Experimental Phi Rating", ylab="Actual Phi Average Value")
-# for (i in subset){
-#   abline(sims_2[i,1] + sims_2[i,3], sims_2[i,2], col="grey", alpha = 0.5)
-# }
-# abline(a = mean_intercept, mean_slope, col = "red")
-# # for (i in subset){
-# #   abline(sims_2[i,1], sims_2[i,2], col="black")
-# # }
-# # abline(coef(mdl_3)[1], coef(mdl_3)[2], col="black") # this will not work as there is 15 slopes technically
-
-```
