@@ -12,6 +12,25 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r Checking version}
 version
 ```
+## Introduction
+
+The following script creates the experimental stimuli used for the exam project *Observing the Intrinsic: A Rating Experiment Exploring Connections between Phi and Behavior in Animats*, by visualizing a subset of data from Lundbak Olesen, Thestrup Waade, Albantakis & Mathys, 2023. 
+
+To run the script, it is necessarily to navigate to the Open Science Repository associated with their paper, and download the data set called "timestep_data_task4.csv". 
+
+Full reference for finding the data:
+Lundbak Olesen, C., Waade, P. T., Albantakis, L., & Mathys, C. (2023). Phi fluctuates with surprisal: An empirical pre-study for the synthesis of the free energy principle and integrated information theory. PLOS Computational Biology, 19(10), e1011346. https://doi.org/10.1371/journal.pcbi.1011346
+
+### On batches
+The script generates stimuli in batches, and different of these batches are available in the GitHub repository: 
+
+Batch 1-3 (test batches) = generated with random seed 100
+Batch 5-8 (experimental stimuli) = generated with random seed 200
+Batch 9 is the actual experimental stimuli used in the online survey. Running the entire script will replicate this stimuli.
+
+### Where to read more?
+For more information on the experiment and the data used for the visualization, see section 3 of my exam paper. 
+
 
 ## 1. Set-up
 
@@ -1055,9 +1074,3 @@ for (s in 1:nrow(final_battery)) {
   animating_animat(input_data = final_battery, t = final_battery$trial[s], a = final_battery$agent[s], r = final_battery$run[s], batch_name = batch_name)
 }
 ```
-
-Notes on batch generation: 
-
-Batch 1-3 (test batches) generated with random seed 100
-Batch 5-8 (experimental stimuli) generated with random seed 200
-Batch 9 is the actual experimental stimuli used in the online survey. Running the entire script will replicate this stimuli.
