@@ -5,6 +5,8 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
+# Set-up
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -18,7 +20,6 @@ pacman::p_load(tidyverse,
 # Checking versions of R and rstanarm:
 version
 packageVersion("rstanarm")
-
 ```
 
 # 1. Initial Data Operations
@@ -180,7 +181,7 @@ merged_data %>%
 
 In this section, different linear regression models are fitted to gain an estimate of systematic variation in the rating of phi according to the actual value of phi for each observation (individual rating) in the online experiment. 
 
-Concretely, a sequence of linear regression models are fitted to predict the actual phi value based on the ratings of phi. The models includes task_type as an additional predictor to account for possible systematic variations caused by the different task types. 
+Concretely, a sequence of linear regression models are fitted to predict the ratings of phi based on the average values of phi. The models includes task_type as an additional predictor to account for possible systematic variations caused by the different task types. 
 
 ## 2.1 Simple Linear Regression Models
 
@@ -248,6 +249,7 @@ abline(a = mean_intercept_mdl_3 + mean_type_mdl_3, b = mean_slope_mdl_3, col = "
 
 # Extracting confidence intervals or uncertainty intervals for the phi rating slope from mdl_3:
 CI_mdl_3 <- quantile(sims_3[,2], c(0.025, 0.975))
+CI_mdl_3_intercept <- quantile(sims_3[,1], c(0.025, 0.975))
 
 # Seeing the distribution of estimates:
 sims_3_df <- data.frame(sims_3)
@@ -318,16 +320,17 @@ for (i in seq(1:nrow(battery_data))){
   timestep_subset_loop <- rbind(timestep_subset_loop, subset_data)
 }
 timestep_subset <- timestep_subset_loop
-#timestep_subset
 ```
 
 ```{r}
-# Assigning unique identifier:
+# Creating a unique identifier vector to append to the timestep_subset data frame:
 id <- data.frame(rep(1:20, each = 33))
 
+# Checking dimensions of the two objects:
 nrow(timestep_subset)
 nrow(id)
 
+# Merging data objects:
 timestep_subset <- cbind(timestep_subset, id)
 timestep_subset <- timestep_subset %>% rename(id = rep.1.20..each...33.)
 timestep_subset <- timestep_subset %>% relocate(id, .before = run)
@@ -345,7 +348,7 @@ direction_changes <- timestep_subset %>%
   group_by(id) %>% 
   summarise(total_direction_changes = n_distinct(movement_sequence))
 
-# Extracting the run, agent, trial information:
+# Extracting the run, agent, and trial information:
 timestep_subset_one_in_each <- timestep_subset %>% 
   group_by(id) %>% 
   sample_n(1) %>% 
@@ -374,11 +377,18 @@ Which also does not reveal any immediate pattern.
 
 ## 3.2 Regression
 
+Making a new regression model including the new variable: 
+
 ```{r}
-mdl_5 <- stan_glmer(phi_rating ~ total_direction_changes + task_type + (1|subj_id), data = merged_data_direction, refresh = 0)
+set.seed(33)
+
+mdl_5 <- stan_glmer(phi_rating ~ total_direction_changes + avg_phi + task_type + (1|subj_id), data = merged_data_direction, refresh = 0)
+
+merged_data_direction
 
 print(mdl_5)
 ```
+Visualizing the coefficients from model 5 and computing confidence intervals:
 
 ```{r}
 # Setting seed:
@@ -386,35 +396,27 @@ set.seed(33)
 
 # Extracting coefficients and computing a mean slope for the phi_rating coefficient + intercept:
 coef_mdl_5 <- coef(mdl_5)
-mean_slope_mdl_5 <- mean(coef_mdl_5$subj_id[2]$total_direction_changes)
+mean_slope_mdl_5_direction <- mean(coef_mdl_5$subj_id[2]$total_direction_changes)
+mean_slope_mdl_5_phi <- mean(coef_mdl_5$subj_id[3]$avg_phi)
 mean_intercept_mdl_5 <- mean(coef_mdl_5$subj_id[1]$`(Intercept)`)
-mean_type_mdl_5 <- mean(coef_mdl_5$subj_id[3]$task_typecatch)
+mean_type_mdl_5 <- mean(coef_mdl_5$subj_id[4]$task_typecatch)
 
 # Plotting a random selection of estimated regression lines (using a script modeled on the one shown on pp. 156-157 in Gelman et al., 2020):
 sims_5 <- as.matrix(mdl_5)
 n_sims_5 <- nrow(sims_5)
 subset <- sample(n_sims_5, 20)
-plot(merged_data_direction$total_direction_changes, merged_data_direction$phi_rating,
-     xlab="Total Direction Changes", 
+plot(merged_data_direction$avg_phi, merged_data_direction$phi_rating,
+     xlab="Avg_Phi Rating", 
      ylab="Conciousness Rating",
      main = "Regression Line Samples, Model 5 \nTask Type = Catch")
 for (i in subset){
-  abline(sims_5[i,1] + sims_5[i,3], sims_5[i,2], col="grey")
+  abline(sims_5[i,1] + sims_5[i,4], sims_5[i,2] + sims_5[i,3], col="grey")
 }
-abline(a = mean_intercept_mdl_5 + mean_type_mdl_5, mean_slope_mdl_5, col = "blue")
+abline(a = mean_intercept_mdl_5 + mean_type_mdl_5, mean_slope_mdl_5_direction + mean_slope_mdl_5_phi, col = "blue")
 
-# Plotting mean of regression lines for both task types:
-colors <- ifelse(merged_data_direction$task_type=="catch", "blue", "red")
-plot(merged_data_direction$total_direction_changes, merged_data_direction$phi_rating,
-     xlab = "Total Direction Changes", 
-     ylab = "Consciousness Rating", 
-     main = "Mean Regression Lines, Model 5 \nCatch = Blue, Avoid = Red",
-     col = colors)
-abline(a = mean_intercept_mdl_5 + mean_type_mdl_5, mean_slope_mdl_5, col = "blue")
-abline(a = mean_intercept_mdl_5, mean_slope_mdl_5, col = "red")
-
-# Extracting confidence intervals or uncertainty intervals for the phi rating slope from mdl_3:
-CI_mdl_5 <- quantile(sims_5[,2], c(0.025, 0.975))
+# Extracting confidence intervals or uncertainty intervals for the phi rating slope from mdl_5:
+CI_mdl_5_direction <- quantile(sims_5[,2], c(0.025, 0.975))
+CI_mdl_5_avg_phi <- quantile(sims_5[,3], c(0.025, 0.975))
 
 # Seeing the distribution of estimates:
 sims_5_df <- data.frame(sims_5)
@@ -428,13 +430,13 @@ ggplot(data = sims_5_df, aes(x = total_direction_changes)) +
   ggtitle("Posterior Distribution of Total Dir. Changes Coefficient Estimates from Model 5") +
   labs(x = "Total Direction Changes Coefficient Estimate") +
   #ggtitle("Posterior Distribution of Total Direction Changes Coefficient Estimates from Model 5") +
-  annotate("text", x = c(CI_mdl_5[[1]] + 0.1, mean_slope_mdl_5 + 0.1, CI_mdl_5[[2]] - 0.1), y = 1.3, label = c("-2 SE", "Mean", "+2 SE"),
+  annotate("text", x = c(CI_mdl_5_direction[[1]] + 0.1, mean_slope_mdl_5 + 0.1, CI_mdl_5_direction[[2]] - 0.1), y = 1, label = c("-2 SE", "Mean", "+2 SE"),
            color = "Black", vjust = 0, size = 3)
 ```
 
 # 4. Evaluating model fit
 
-The last thing that would be good to do is to evaluate the fit, e.g., by looking into sigma (which is rather large?)
+The last thing that would be good to do is to evaluate the fit, e.g., by looking into sigma (which is rather large):
 
 ```{r}
 # Printing mdl summaries:
@@ -446,13 +448,18 @@ sigma(mdl_3)
 sigma(mdl_5)
 
 # Printing coefficient CI:
-print("Mdl_3 CI:")
-CI_mdl_3
-print("Mdl_5 CI:")
-CI_mdl_5
-```
+cat("Mdl_3 CI avg_phi coefficient: ",
+round(CI_mdl_3, digits = 3))
 
-Maybe the best approach here is to make simulated distributions with the parameters estimated by the model, and then run the models again on that data to see how well it recovers the parameters.
+cat("Mdl_3 CI intercept: ",
+round(CI_mdl_3_intercept, digits = 3))
+
+cat("\nMdl_5 CI total_direction_changes coefficient: ",
+round(CI_mdl_5_direction, digits = 3))
+
+cat("\nMdl_5 CI avg_phi coefficient: ",
+round(CI_mdl_5_avg_phi, digits = 3))
+```
 
 ## 4.1 Predicting for new hypothetical data points based on mdl_3 to get a sense for the uncertainty in the model
 
@@ -506,7 +513,6 @@ plot(density(y_post_pred),
      xlab = "Consciousness Rating Value Prediction",
      cex.lab = 0.8)
 ```
-
 
 ```{r Predictions based on mdl_5, low number of direction changes}
 # Setting seed:
@@ -581,6 +587,3 @@ loo(mdl_3)
 # References
 
 Gelman, A., Hill, J., & Vehtari, A. (2020). Regression and Other Stories (1st ed.). Cambridge University Press. https://doi.org/10.1017/9781139161879
-
-
-
